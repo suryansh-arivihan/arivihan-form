@@ -1,0 +1,20 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+    build:
+      commands:
+        - echo "APP_AWS_REGION=$APP_AWS_REGION"
+        - echo "DYNAMODB_TABLE_NAME=$DYNAMODB_TABLE_NAME"
+        - echo "S3_BUCKET_NAME=$S3_BUCKET_NAME"
+        - npm run build
+  artifacts:
+    baseDirectory: .next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+      - .next/cache/**/*
