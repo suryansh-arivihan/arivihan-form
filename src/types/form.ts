@@ -83,7 +83,11 @@ export interface PresignedUrlRequest {
   fileName: string;
   fileType: string;
   folder: "admit-cards" | "answer-sheets";
+  studentName: string;
+  mobileNumber: string;
   subjectCode?: string;
+  submissionType?: SubmissionType;
+  imageIndex?: number;
 }
 
 export interface PresignedUrlResponse {

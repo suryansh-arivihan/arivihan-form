@@ -54,7 +54,7 @@ export default function SubmissionForm() {
     resetForm,
   } = useFormState();
 
-  const { isUploading, uploadSingleFile, uploadMultipleFiles } = useFileUpload();
+  const { isUploading, uploadAdmitCard, uploadAnswerSheets } = useFileUpload();
   const { validateForm, hasErrors } = useFormValidation();
 
   const [errors, setErrors] = useState<FormErrors>({});
@@ -180,8 +180,17 @@ export default function SubmissionForm() {
 
   const handleAdmitCardFileChange = async (file: File | null) => {
     if (file) {
+      // Validate student info is available before upload
+      if (!formData.studentName || !formData.mobileNumber || formData.mobileNumber.length !== 10) {
+        alert("कृपया पहले नाम और मोबाइल नंबर भरें / Please fill name and mobile number first");
+        return;
+      }
+
       setAdmitCardFile(file, "");
-      const result = await uploadSingleFile(file, "admit-cards");
+      const result = await uploadAdmitCard(file, {
+        studentName: formData.studentName,
+        mobileNumber: formData.mobileNumber,
+      });
       if (result.success && result.fileUrl) {
         setAdmitCardFile(file, result.fileUrl);
       } else {
@@ -215,10 +224,16 @@ export default function SubmissionForm() {
         const subjectFile = formData.subjectFiles[subjectCode];
         if (!subjectFile || subjectFile.files.length === 0) continue;
 
-        const uploadResult = await uploadMultipleFiles(
+        const uploadResult = await uploadAnswerSheets(
           subjectFile.files,
-          "answer-sheets",
-          subjectCode,
+          {
+            studentName: formData.studentName,
+            mobileNumber: formData.mobileNumber,
+          },
+          {
+            subjectCode,
+            submissionType: formData.submissionType!,
+          },
           (progress) => setSubjectUploadProgress(subjectCode, progress)
         );
 

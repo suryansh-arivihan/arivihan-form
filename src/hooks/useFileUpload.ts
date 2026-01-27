@@ -1,12 +1,22 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { PresignedUrlRequest, PresignedUrlResponse } from "@/types/form";
+import { PresignedUrlRequest, PresignedUrlResponse, SubmissionType } from "@/types/form";
 
 interface UploadResult {
   success: boolean;
   fileUrl?: string;
   error?: string;
+}
+
+interface StudentInfo {
+  studentName: string;
+  mobileNumber: string;
+}
+
+interface AnswerSheetUploadOptions {
+  subjectCode: string;
+  submissionType: SubmissionType;
 }
 
 export function useFileUpload() {
@@ -62,11 +72,10 @@ export function useFileUpload() {
     });
   };
 
-  const uploadSingleFile = useCallback(
+  const uploadAdmitCard = useCallback(
     async (
       file: File,
-      folder: "admit-cards" | "answer-sheets",
-      subjectCode?: string,
+      studentInfo: StudentInfo,
       onProgress?: (progress: number) => void
     ): Promise<UploadResult> => {
       setIsUploading(true);
@@ -75,8 +84,9 @@ export function useFileUpload() {
         const presignedData = await getPresignedUrl({
           fileName: file.name,
           fileType: file.type,
-          folder,
-          subjectCode,
+          folder: "admit-cards",
+          studentName: studentInfo.studentName,
+          mobileNumber: studentInfo.mobileNumber,
         });
 
         if (!presignedData) {
@@ -99,11 +109,11 @@ export function useFileUpload() {
     []
   );
 
-  const uploadMultipleFiles = useCallback(
+  const uploadAnswerSheets = useCallback(
     async (
       files: File[],
-      folder: "admit-cards" | "answer-sheets",
-      subjectCode?: string,
+      studentInfo: StudentInfo,
+      options: AnswerSheetUploadOptions,
       onProgress?: (progress: number) => void
     ): Promise<{ success: boolean; fileUrls: string[]; errors: string[] }> => {
       setIsUploading(true);
@@ -113,11 +123,29 @@ export function useFileUpload() {
       let completedFiles = 0;
 
       try {
-        for (const file of files) {
-          const result = await uploadSingleFile(
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+
+          const presignedData = await getPresignedUrl({
+            fileName: file.name,
+            fileType: file.type,
+            folder: "answer-sheets",
+            studentName: studentInfo.studentName,
+            mobileNumber: studentInfo.mobileNumber,
+            subjectCode: options.subjectCode,
+            submissionType: options.submissionType,
+            imageIndex: files.length > 1 ? i : undefined, // Only use index for multiple images
+          });
+
+          if (!presignedData) {
+            errors.push(`Failed to get upload URL for ${file.name}`);
+            completedFiles++;
+            continue;
+          }
+
+          const uploadSuccess = await uploadFile(
             file,
-            folder,
-            subjectCode,
+            presignedData.uploadUrl,
             (fileProgress) => {
               if (onProgress) {
                 const overallProgress = Math.round(
@@ -128,10 +156,10 @@ export function useFileUpload() {
             }
           );
 
-          if (result.success && result.fileUrl) {
-            fileUrls.push(result.fileUrl);
+          if (uploadSuccess) {
+            fileUrls.push(presignedData.fileUrl);
           } else {
-            errors.push(result.error || "Unknown error");
+            errors.push(`Failed to upload ${file.name}`);
           }
 
           completedFiles++;
@@ -146,12 +174,12 @@ export function useFileUpload() {
         setIsUploading(false);
       }
     },
-    [uploadSingleFile]
+    []
   );
 
   return {
     isUploading,
-    uploadSingleFile,
-    uploadMultipleFiles,
+    uploadAdmitCard,
+    uploadAnswerSheets,
   };
 }

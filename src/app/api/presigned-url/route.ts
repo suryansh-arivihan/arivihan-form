@@ -9,7 +9,16 @@ import {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { fileName, fileType, folder, subjectCode, submissionId } = body;
+    const {
+      fileName,
+      fileType,
+      folder,
+      subjectCode,
+      studentName,
+      mobileNumber,
+      submissionType,
+      imageIndex,
+    } = body;
 
     if (!fileName || !fileType || !folder) {
       return NextResponse.json(
@@ -18,19 +27,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const tempSubmissionId = submissionId || `TEMP-${Date.now()}`;
+    if (!studentName || !mobileNumber) {
+      return NextResponse.json(
+        { error: "Student name and mobile number are required" },
+        { status: 400 }
+      );
+    }
+
     let key: string;
 
     if (folder === "admit-cards") {
-      key = generateAdmitCardPath(tempSubmissionId, fileName);
+      key = generateAdmitCardPath(studentName, mobileNumber, fileName);
     } else if (folder === "answer-sheets") {
-      if (!subjectCode) {
+      if (!subjectCode || !submissionType) {
         return NextResponse.json(
-          { error: "Subject code required for answer sheets" },
+          { error: "Subject code and submission type required for answer sheets" },
           { status: 400 }
         );
       }
-      key = generateAnswerSheetPath(tempSubmissionId, subjectCode, fileName);
+      key = generateAnswerSheetPath(
+        studentName,
+        mobileNumber,
+        submissionType,
+        subjectCode,
+        fileName,
+        imageIndex
+      );
     } else {
       return NextResponse.json(
         { error: "Invalid folder" },
