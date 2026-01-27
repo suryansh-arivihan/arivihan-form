@@ -69,15 +69,15 @@ export default function SubmissionForm() {
     message: string;
   } | null>(null);
 
-  const checkQuota = useCallback(async (mobile: string) => {
-    if (mobile.length !== 10) return;
+  const checkQuota = useCallback(async (name: string, mobile: string) => {
+    if (mobile.length !== 10 || name.trim().length < 2) return;
 
     setIsCheckingQuota(true);
     try {
       const response = await fetch("/api/check-duplicate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobileNumber: mobile }),
+        body: JSON.stringify({ studentName: name, mobileNumber: mobile }),
       });
 
       const data = await response.json();
@@ -142,8 +142,16 @@ export default function SubmissionForm() {
   };
 
   const handleMobileBlur = () => {
-    if (formData.mobileNumber.length === 10) {
-      checkQuota(formData.mobileNumber);
+    // Check quota when both name and mobile are valid
+    if (formData.mobileNumber.length === 10 && formData.studentName.trim().length >= 2) {
+      checkQuota(formData.studentName, formData.mobileNumber);
+    }
+  };
+
+  const handleNameBlur = () => {
+    // Check quota when both name and mobile are valid
+    if (formData.studentName.trim().length >= 2 && formData.mobileNumber.length === 10) {
+      checkQuota(formData.studentName, formData.mobileNumber);
     }
   };
 
@@ -339,7 +347,12 @@ export default function SubmissionForm() {
             onStudentNameChange={(v) => {
               setStudentName(v);
               setErrors((prev) => ({ ...prev, studentName: undefined }));
+              // Reset quota when name changes
+              if (v.trim().length < 2) {
+                setQuota(initialQuotaState);
+              }
             }}
+            onStudentNameBlur={handleNameBlur}
             onMobileNumberChange={handleMobileNumberChange}
             onMobileBlur={handleMobileBlur}
             onMediumOfStudyChange={(v) => {
@@ -430,8 +443,8 @@ export default function SubmissionForm() {
               <p className="text-sm text-text-secondary mb-1">
                 {MESSAGES.success.submissionIdLabel}
               </p>
-              <p className="text-lg font-semibold text-primary-700 mb-3">
-                {submissionResult.submissionId}
+              <p className="text-lg font-semibold text-primary-700 mb-3 break-all">
+                {submissionResult.studentId}
               </p>
 
               {submissionResult.subjects && submissionResult.subjects.length > 0 && (

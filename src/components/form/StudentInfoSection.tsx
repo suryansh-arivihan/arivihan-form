@@ -21,6 +21,7 @@ interface StudentInfoSectionProps {
   admitCardFileUrl: string;
   errors: FormErrors;
   onStudentNameChange: (value: string) => void;
+  onStudentNameBlur?: () => void;
   onMobileNumberChange: (value: string) => void;
   onMobileBlur?: () => void;
   onMediumOfStudyChange: (value: MediumOfStudy) => void;
@@ -43,6 +44,7 @@ export default function StudentInfoSection({
   admitCardFile,
   errors,
   onStudentNameChange,
+  onStudentNameBlur,
   onMobileNumberChange,
   onMobileBlur,
   onMediumOfStudyChange,
@@ -90,6 +92,7 @@ export default function StudentInfoSection({
         name="studentName"
         value={studentName}
         onChange={onStudentNameChange}
+        onBlur={onStudentNameBlur}
         placeholder={MESSAGES.studentNamePlaceholder}
         required
         error={errors.studentName}

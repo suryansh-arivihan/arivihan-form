@@ -57,7 +57,7 @@ export interface SubmissionPayload {
 
 export interface SubmissionResponse {
   success: boolean;
-  submissionId?: string;
+  studentId?: string;  // Same as S3 folder name: {name}_{mobile}
   createdAt?: string;
   subjects?: {
     code: string;

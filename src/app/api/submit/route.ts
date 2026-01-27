@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import {
-  createSubmission,
   getSubmissionQuota,
-  getNextSubmissionCounter,
-  SubmissionRecord,
+  upsertStudentSubmission,
+  generateStudentId,
 } from "@/lib/aws/dynamodb";
-import { generateSubmissionId, formatDate } from "@/lib/utils/submission-id";
+import { formatDate } from "@/lib/utils/submission-id";
 import { getSubjectByCode } from "@/constants/subjects";
 
 const submitSchema = z.object({
@@ -43,7 +42,7 @@ export async function POST(request: NextRequest) {
     const data = validation.data;
 
     // Check quota and already submitted subjects
-    const quota = await getSubmissionQuota(data.mobileNumber);
+    const quota = await getSubmissionQuota(data.studentName, data.mobileNumber);
 
     const isArivihan = data.submissionType === "arivihan_model_paper";
     const usedSubjects = isArivihan ? quota.arivihanSubjectsUsed : quota.ownSubjectsUsed;
@@ -104,23 +103,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const counter = await getNextSubmissionCounter();
-    const submissionId = generateSubmissionId(counter);
+    // Create or update student record with new subjects
+    const studentRecord = await upsertStudentSubmission(
+      data.studentName,
+      data.mobileNumber,
+      data.mediumOfStudy,
+      data.submissionType,
+      data.subjects,
+      data.admitCardNumber,
+      data.admitCardFileUrl
+    );
 
-    const submission: SubmissionRecord = {
-      submissionId,
-      studentName: data.studentName,
-      mobileNumber: data.mobileNumber,
-      mediumOfStudy: data.mediumOfStudy,
-      admitCardNumber: data.admitCardNumber,
-      admitCardFileUrl: data.admitCardFileUrl,
-      submissionType: data.submissionType,
-      subjects: data.subjects,
-      createdAt: new Date().toISOString(),
-      status: "pending",
-    };
-
-    await createSubmission(submission);
+    // The studentId is same as S3 folder name
+    const studentId = generateStudentId(data.studentName, data.mobileNumber);
 
     const submittedSubjects = data.subjects.map((s) => {
       const subject = getSubjectByCode(s.subjectCode);
@@ -132,18 +127,17 @@ export async function POST(request: NextRequest) {
     });
 
     // Calculate new remaining quota
-    const newRemaining = isArivihan
-      ? quota.arivihanRemaining - data.subjects.length
-      : quota.ownRemaining - data.subjects.length;
+    const newArivihanRemaining = 3 - studentRecord.arivihanSubjects.length;
+    const newOwnRemaining = 1 - studentRecord.ownSubjects.length;
 
     return NextResponse.json({
       success: true,
-      submissionId,
-      createdAt: formatDate(submission.createdAt),
+      studentId,
+      createdAt: formatDate(studentRecord.updatedAt),
       subjects: submittedSubjects,
       remainingQuota: {
-        arivihanRemaining: isArivihan ? newRemaining : quota.arivihanRemaining,
-        ownRemaining: isArivihan ? quota.ownRemaining : newRemaining,
+        arivihanRemaining: Math.max(0, newArivihanRemaining),
+        ownRemaining: Math.max(0, newOwnRemaining),
       },
     });
   } catch (error) {

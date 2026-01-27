@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSubmissionQuota } from "@/lib/aws/dynamodb";
+import { getSubmissionQuota, generateStudentId } from "@/lib/aws/dynamodb";
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { mobileNumber } = body;
+    const { studentName, mobileNumber } = body;
 
     if (!mobileNumber || !/^\d{10}$/.test(mobileNumber)) {
       return NextResponse.json(
@@ -22,9 +22,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const quota = await getSubmissionQuota(mobileNumber);
+    if (!studentName || studentName.trim().length < 2) {
+      return NextResponse.json(
+        { error: "Invalid student name" },
+        { status: 400 }
+      );
+    }
+
+    const quota = await getSubmissionQuota(studentName, mobileNumber);
+    const studentId = generateStudentId(studentName, mobileNumber);
 
     return NextResponse.json({
+      studentId,
       quota: {
         arivihanSubjectsUsed: quota.arivihanSubjectsUsed,
         ownSubjectsUsed: quota.ownSubjectsUsed,
