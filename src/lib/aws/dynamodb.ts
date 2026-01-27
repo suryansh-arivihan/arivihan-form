@@ -4,6 +4,7 @@ import {
   PutCommand,
   GetCommand,
   UpdateCommand,
+  ScanCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { generateStudentFolder } from "@/lib/utils/file-naming";
 
@@ -259,5 +260,33 @@ export async function getSubmissionQuota(
     ownSubjectsUsed: ownSubjects,
     arivihanRemaining: Math.max(0, 3 - arivihanSubjects.length),
     ownRemaining: Math.max(0, 1 - ownSubjects.length),
+  };
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  lastEvaluatedKey?: Record<string, unknown>;
+  totalScanned: number;
+}
+
+/**
+ * Scan all student submissions with optional pagination
+ */
+export async function scanAllSubmissions(
+  limit: number = 25,
+  lastEvaluatedKey?: Record<string, unknown>
+): Promise<PaginatedResult<StudentRecord>> {
+  const command = new ScanCommand({
+    TableName: TABLE_NAME,
+    Limit: limit,
+    ExclusiveStartKey: lastEvaluatedKey,
+  });
+
+  const response = await docClient.send(command);
+
+  return {
+    items: (response.Items || []) as StudentRecord[],
+    lastEvaluatedKey: response.LastEvaluatedKey,
+    totalScanned: response.ScannedCount || 0,
   };
 }
