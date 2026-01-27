@@ -19,10 +19,10 @@ export const SUBJECTS: Subject[] = [
 export const MAX_SUBJECTS_ARIVIHAN = 3;
 export const MAX_SUBJECTS_OWN = 1;
 
-export const MAX_PDF_SIZE_MB = 25;
-export const MAX_IMAGE_SIZE_MB = 5;
+export const MAX_PDF_SIZE_MB = 100;
+export const MAX_IMAGE_SIZE_MB = 25;
 export const MAX_IMAGES_PER_SUBJECT = 10;
-export const MAX_ADMIT_CARD_SIZE_MB = 5;
+export const MAX_ADMIT_CARD_SIZE_MB = 25;
 
 export const ACCEPTED_FILE_TYPES = {
   pdf: {
