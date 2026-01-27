@@ -80,13 +80,34 @@ export default function SubmissionForm() {
         body: JSON.stringify({ mobileNumber: mobile }),
       });
 
-      const data: QuotaCheckResponse = await response.json();
+      const data = await response.json();
+
+      // Check if response has an error
+      if (!response.ok || data.error) {
+        console.error("Quota check failed:", data.error);
+        // Don't show error modal, just use default quota (allows user to proceed)
+        setQuota({
+          ...initialQuotaState,
+          isLoaded: true,
+        });
+        return;
+      }
+
+      // Validate the response structure
+      if (!data.quota) {
+        console.error("Invalid quota response:", data);
+        setQuota({
+          ...initialQuotaState,
+          isLoaded: true,
+        });
+        return;
+      }
 
       setQuota({
-        arivihanSubjectsUsed: data.quota.arivihanSubjectsUsed,
-        ownSubjectsUsed: data.quota.ownSubjectsUsed,
-        arivihanRemaining: data.quota.arivihanRemaining,
-        ownRemaining: data.quota.ownRemaining,
+        arivihanSubjectsUsed: data.quota.arivihanSubjectsUsed || [],
+        ownSubjectsUsed: data.quota.ownSubjectsUsed || [],
+        arivihanRemaining: data.quota.arivihanRemaining ?? 3,
+        ownRemaining: data.quota.ownRemaining ?? 1,
         isLoaded: true,
       });
 
@@ -100,6 +121,11 @@ export default function SubmissionForm() {
       }
     } catch (error) {
       console.error("Error checking quota:", error);
+      // On network error, use default quota
+      setQuota({
+        ...initialQuotaState,
+        isLoaded: true,
+      });
     } finally {
       setIsCheckingQuota(false);
     }
