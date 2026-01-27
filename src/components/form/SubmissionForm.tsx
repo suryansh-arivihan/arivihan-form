@@ -450,9 +450,9 @@ export default function SubmissionForm() {
               {submissionResult.subjects && submissionResult.subjects.length > 0 && (
                 <>
                   <p className="text-sm text-text-secondary mb-2">
-                    {MESSAGES.success.submittedSubjectsLabel}
+                    इस बार जमा किए गए विषय / Subjects submitted now:
                   </p>
-                  <ul className="space-y-1">
+                  <ul className="space-y-1 mb-3">
                     {submissionResult.subjects.map((subject) => (
                       <li key={subject.code} className="text-sm text-text-primary">
                         • {subject.nameHi} ({subject.nameEn})
@@ -462,32 +462,54 @@ export default function SubmissionForm() {
                 </>
               )}
 
-              {submissionResult.remainingQuota && (
+              {submissionResult.usedQuota && (
                 <div className="mt-3 pt-3 border-t border-gray-200">
-                  <p className="text-xs text-text-secondary">
-                    शेष सीमा / Remaining Quota:
+                  <p className="text-sm font-medium text-text-primary mb-2">
+                    कुल जमा विषय / Total Submitted Subjects:
                   </p>
-                  <p className="text-xs text-text-secondary">
-                    Arivihan Model Paper: {submissionResult.remainingQuota.arivihanRemaining}/3 विषय
-                  </p>
-                  <p className="text-xs text-text-secondary">
-                    Own Question Paper: {submissionResult.remainingQuota.ownRemaining}/1 विषय
-                  </p>
+
+                  {submissionResult.usedQuota.arivihanSubjects.length > 0 && (
+                    <div className="mb-2">
+                      <p className="text-xs text-text-secondary mb-1">
+                        Arivihan Model Paper ({submissionResult.usedQuota.arivihanSubjects.length}/3):
+                      </p>
+                      <ul className="space-y-0.5 ml-2">
+                        {submissionResult.usedQuota.arivihanSubjects.map((subject) => (
+                          <li key={subject.code} className="text-xs text-green-700">
+                            ✓ {subject.nameHi}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {submissionResult.usedQuota.ownSubjects.length > 0 && (
+                    <div>
+                      <p className="text-xs text-text-secondary mb-1">
+                        Own Question Paper ({submissionResult.usedQuota.ownSubjects.length}/1):
+                      </p>
+                      <ul className="space-y-0.5 ml-2">
+                        {submissionResult.usedQuota.ownSubjects.map((subject) => (
+                          <li key={subject.code} className="text-xs text-green-700">
+                            ✓ {subject.nameHi}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {submissionResult.usedQuota.arivihanSubjects.length === 0 &&
+                   submissionResult.usedQuota.ownSubjects.length === 0 && (
+                    <p className="text-xs text-text-secondary">कोई विषय नहीं / No subjects yet</p>
+                  )}
                 </div>
               )}
             </div>
           )}
 
-          <p className="text-sm text-text-secondary mb-4">
+          <p className="text-sm text-text-secondary">
             {MESSAGES.success.thankYou}
           </p>
-
-          <button
-            onClick={handleSuccessClose}
-            className="w-full py-2.5 px-4 bg-primary-700 text-white rounded-md hover:bg-primary-800 transition-colors"
-          >
-            {MESSAGES.submitAnother}
-          </button>
         </div>
       </Modal>
 

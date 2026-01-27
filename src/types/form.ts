@@ -66,9 +66,18 @@ export interface SubmissionResponse {
   }[];
   error?: string;
   message?: string;
-  remainingQuota?: {
-    arivihanRemaining: number;
-    ownRemaining: number;
+  // Summary of all used subjects (total across all submissions)
+  usedQuota?: {
+    arivihanSubjects: {
+      code: string;
+      nameEn: string;
+      nameHi: string;
+    }[];
+    ownSubjects: {
+      code: string;
+      nameEn: string;
+      nameHi: string;
+    }[];
   };
   quota?: {
     arivihanSubjectsUsed: string[];

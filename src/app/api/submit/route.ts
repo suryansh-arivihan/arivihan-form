@@ -126,18 +126,33 @@ export async function POST(request: NextRequest) {
       };
     });
 
-    // Calculate new remaining quota
-    const newArivihanRemaining = 3 - studentRecord.arivihanSubjects.length;
-    const newOwnRemaining = 1 - studentRecord.ownSubjects.length;
+    // Build used quota summary with full subject details
+    const arivihanUsedSubjects = studentRecord.arivihanSubjects.map((s) => {
+      const subject = getSubjectByCode(s.subjectCode);
+      return {
+        code: s.subjectCode,
+        nameEn: subject?.nameEn || s.subjectCode,
+        nameHi: subject?.nameHi || s.subjectCode,
+      };
+    });
+
+    const ownUsedSubjects = studentRecord.ownSubjects.map((s) => {
+      const subject = getSubjectByCode(s.subjectCode);
+      return {
+        code: s.subjectCode,
+        nameEn: subject?.nameEn || s.subjectCode,
+        nameHi: subject?.nameHi || s.subjectCode,
+      };
+    });
 
     return NextResponse.json({
       success: true,
       studentId,
       createdAt: formatDate(studentRecord.updatedAt),
       subjects: submittedSubjects,
-      remainingQuota: {
-        arivihanRemaining: Math.max(0, newArivihanRemaining),
-        ownRemaining: Math.max(0, newOwnRemaining),
+      usedQuota: {
+        arivihanSubjects: arivihanUsedSubjects,
+        ownSubjects: ownUsedSubjects,
       },
     });
   } catch (error) {
