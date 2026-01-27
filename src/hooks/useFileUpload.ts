@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { PresignedUrlRequest, PresignedUrlResponse, SubmissionType } from "@/types/form";
+import { imagesToPdf, areAllImages } from "@/lib/utils/pdf-generator";
 
 interface UploadResult {
   success: boolean;
@@ -120,49 +121,99 @@ export function useFileUpload() {
 
       const fileUrls: string[] = [];
       const errors: string[] = [];
-      let completedFiles = 0;
 
       try {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
+        // Check if all files are images - if so, convert to single PDF
+        if (areAllImages(files)) {
+          onProgress?.(5); // Show initial progress during conversion
 
+          // Convert images to a single PDF
+          const pdfBlob = await imagesToPdf(files);
+          const pdfFile = new File([pdfBlob], "answer_sheet.pdf", {
+            type: "application/pdf",
+          });
+
+          onProgress?.(20); // Conversion complete
+
+          // Get presigned URL for the single PDF
           const presignedData = await getPresignedUrl({
-            fileName: file.name,
-            fileType: file.type,
+            fileName: pdfFile.name,
+            fileType: pdfFile.type,
             folder: "answer-sheets",
             studentName: studentInfo.studentName,
             mobileNumber: studentInfo.mobileNumber,
             subjectCode: options.subjectCode,
             submissionType: options.submissionType,
-            imageIndex: files.length > 1 ? i : undefined, // Only use index for multiple images
+            // No imageIndex - single PDF file
           });
 
           if (!presignedData) {
-            errors.push(`Failed to get upload URL for ${file.name}`);
-            completedFiles++;
-            continue;
+            errors.push("Failed to get upload URL for PDF");
+            return { success: false, fileUrls, errors };
           }
 
+          onProgress?.(25);
+
+          // Upload the PDF
           const uploadSuccess = await uploadFile(
-            file,
+            pdfFile,
             presignedData.uploadUrl,
             (fileProgress) => {
-              if (onProgress) {
-                const overallProgress = Math.round(
-                  ((completedFiles + fileProgress / 100) / files.length) * 100
-                );
-                onProgress(overallProgress);
-              }
+              // Scale progress from 25-100 (since 0-25 was conversion + presigned URL)
+              onProgress?.(25 + Math.round(fileProgress * 0.75));
             }
           );
 
           if (uploadSuccess) {
             fileUrls.push(presignedData.fileUrl);
           } else {
-            errors.push(`Failed to upload ${file.name}`);
+            errors.push("Failed to upload PDF");
           }
+        } else {
+          // For non-image files (e.g., already a PDF), upload directly
+          let completedFiles = 0;
 
-          completedFiles++;
+          for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            const presignedData = await getPresignedUrl({
+              fileName: file.name,
+              fileType: file.type,
+              folder: "answer-sheets",
+              studentName: studentInfo.studentName,
+              mobileNumber: studentInfo.mobileNumber,
+              subjectCode: options.subjectCode,
+              submissionType: options.submissionType,
+              imageIndex: files.length > 1 ? i : undefined,
+            });
+
+            if (!presignedData) {
+              errors.push(`Failed to get upload URL for ${file.name}`);
+              completedFiles++;
+              continue;
+            }
+
+            const uploadSuccess = await uploadFile(
+              file,
+              presignedData.uploadUrl,
+              (fileProgress) => {
+                if (onProgress) {
+                  const overallProgress = Math.round(
+                    ((completedFiles + fileProgress / 100) / files.length) * 100
+                  );
+                  onProgress(overallProgress);
+                }
+              }
+            );
+
+            if (uploadSuccess) {
+              fileUrls.push(presignedData.fileUrl);
+            } else {
+              errors.push(`Failed to upload ${file.name}`);
+            }
+
+            completedFiles++;
+          }
         }
 
         return {
