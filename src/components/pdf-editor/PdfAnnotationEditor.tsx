@@ -25,19 +25,26 @@ interface PageDimensions {
   height: number;
 }
 
+interface MarksData {
+  obtained: number | null;
+  total: number | null;
+}
+
 interface PdfAnnotationEditorProps {
   pdfUrl: string;
-  onSave: (pdfBlob: Blob) => Promise<void>;
+  onSave: (pdfBlob: Blob, marks: MarksData) => Promise<void>;
   onClose: () => void;
+  subjectName?: string;
 }
 
 export default function PdfAnnotationEditor({
   pdfUrl,
   onSave,
   onClose,
+  subjectName,
 }: PdfAnnotationEditorProps) {
   const [numPages, setNumPages] = useState<number>(0);
-  const [scale, setScale] = useState(1.0);
+  const [scale, setScale] = useState(0.5);
   const [tool, setTool] = useState<"pen" | "eraser">("pen");
   const [color, setColor] = useState("#e53935");
   const [strokeWidth, setStrokeWidth] = useState(3);
@@ -46,7 +53,9 @@ export default function PdfAnnotationEditor({
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
   const [saving, setSaving] = useState(false);
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
-  const [pageDimensions, setPageDimensions] = useState<{ [key: number]: PageDimensions }>({});
+  const [pageDimensions, setPageDimensions] = useState<{ [key: number]: PageDimensions }>({})
+  const [marksObtained, setMarksObtained] = useState<string>("");
+  const [marksTotal, setMarksTotal] = useState<string>("");
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number; visible: boolean }>({
     x: 0,
     y: 0,
@@ -327,7 +336,11 @@ export default function PdfAnnotationEditor({
       const modifiedPdfBytes = await pdfDoc.save();
       const blob = new Blob([modifiedPdfBytes as BlobPart], { type: "application/pdf" });
 
-      await onSave(blob);
+      const marksData: MarksData = {
+        obtained: marksObtained.trim() ? parseInt(marksObtained, 10) : null,
+        total: marksTotal.trim() ? parseInt(marksTotal, 10) : null,
+      };
+      await onSave(blob, marksData);
     } catch (error) {
       console.error("Error saving PDF:", error);
       alert("Failed to save. Please try again.");
@@ -419,30 +432,61 @@ export default function PdfAnnotationEditor({
             </button>
           </div>
 
-          {/* Right: Save Button */}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-3 sm:px-4 py-2 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-2 text-sm"
-          >
-            {saving ? (
-              <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span className="hidden sm:inline">Saving...</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span className="hidden sm:inline">Save & Upload</span>
-                <span className="sm:hidden">Save</span>
-              </>
+          {/* Right: Marks Input & Save Button */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Subject Name */}
+            {subjectName && (
+              <span className="text-xs sm:text-sm text-gray-500 hidden sm:inline">
+                {subjectName}
+              </span>
             )}
-          </button>
+
+            {/* Marks Input */}
+            <div className="flex items-center gap-1 sm:gap-2">
+              <span className="text-xs sm:text-sm text-gray-600">Marks:</span>
+              <input
+                type="number"
+                min="0"
+                value={marksObtained}
+                onChange={(e) => setMarksObtained(e.target.value)}
+                placeholder="--"
+                className="w-12 sm:w-14 px-2 py-1 text-sm text-center border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+              />
+              <span className="text-xs sm:text-sm text-gray-500">/</span>
+              <input
+                type="number"
+                min="1"
+                value={marksTotal}
+                onChange={(e) => setMarksTotal(e.target.value)}
+                placeholder="--"
+                className="w-12 sm:w-14 px-2 py-1 text-sm text-center border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-3 sm:px-4 py-2 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-2 text-sm"
+            >
+              {saving ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span className="hidden sm:inline">Saving...</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="hidden sm:inline">Save & Upload</span>
+                  <span className="sm:hidden">Save</span>
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Bottom Row - Colors, Width, Zoom */}

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { updateSubjectEvaluation } from "@/lib/aws/dynamodb";
+import { SubmissionType } from "@/types/form";
 
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION || "ap-south-1",
@@ -18,6 +20,8 @@ export async function POST(request: NextRequest) {
     const studentId = formData.get("studentId") as string | null;
     const subjectCode = formData.get("subjectCode") as string | null;
     const submissionType = formData.get("submissionType") as string | null;
+    const marksObtainedStr = formData.get("marksObtained") as string | null;
+    const marksTotalStr = formData.get("marksTotal") as string | null;
 
     if (!file || !studentId || !subjectCode || !submissionType) {
       return NextResponse.json(
@@ -47,6 +51,18 @@ export async function POST(request: NextRequest) {
     await s3Client.send(command);
 
     const fileUrl = `https://${BUCKET_NAME}.s3.${process.env.APP_AWS_REGION || "ap-south-1"}.amazonaws.com/${key}`;
+
+    // Update DynamoDB with evaluation data
+    const marksObtained = marksObtainedStr ? parseInt(marksObtainedStr, 10) : undefined;
+    const marksTotal = marksTotalStr ? parseInt(marksTotalStr, 10) : undefined;
+    await updateSubjectEvaluation(
+      studentId,
+      submissionType as SubmissionType,
+      subjectCode,
+      fileUrl,
+      marksObtained,
+      marksTotal
+    );
 
     return NextResponse.json({ success: true, fileUrl, key });
   } catch (error) {

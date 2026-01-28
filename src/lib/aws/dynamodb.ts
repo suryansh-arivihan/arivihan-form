@@ -26,6 +26,11 @@ export interface SubjectSubmission {
   fileType: "pdf" | "images";
   fileUrls: string[];
   submittedAt: string;
+  // Evaluation fields (added when teacher checks)
+  checkedFileUrl?: string;
+  checkedAt?: string;
+  marksObtained?: number;
+  marksTotal?: number;
 }
 
 // Single record per student
@@ -289,4 +294,56 @@ export async function scanAllSubmissions(
     lastEvaluatedKey: response.LastEvaluatedKey,
     totalScanned: response.ScannedCount || 0,
   };
+}
+
+/**
+ * Update evaluation data for a specific subject
+ */
+export async function updateSubjectEvaluation(
+  studentId: string,
+  submissionType: "arivihan_model_paper" | "own_question_paper",
+  subjectCode: string,
+  checkedFileUrl: string,
+  marksObtained?: number,
+  marksTotal?: number
+): Promise<StudentRecord | null> {
+  // First get the current record
+  const student = await getStudentById(studentId);
+  if (!student) return null;
+
+  const subjectField = submissionType === "arivihan_model_paper" ? "arivihanSubjects" : "ownSubjects";
+  const subjects = student[subjectField];
+
+  // Find and update the subject
+  const subjectIndex = subjects.findIndex((s) => s.subjectCode === subjectCode);
+  if (subjectIndex === -1) return null;
+
+  const now = new Date().toISOString();
+
+  // Update the subject with evaluation data
+  subjects[subjectIndex] = {
+    ...subjects[subjectIndex],
+    checkedFileUrl,
+    checkedAt: now,
+    ...(marksObtained !== undefined && { marksObtained }),
+    ...(marksTotal !== undefined && { marksTotal }),
+  };
+
+  // Update the record
+  const command = new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { studentId },
+    UpdateExpression: "SET #subjects = :subjects, updatedAt = :now",
+    ExpressionAttributeNames: {
+      "#subjects": subjectField,
+    },
+    ExpressionAttributeValues: {
+      ":subjects": subjects,
+      ":now": now,
+    },
+    ReturnValues: "ALL_NEW",
+  });
+
+  const response = await docClient.send(command);
+  return response.Attributes as StudentRecord;
 }

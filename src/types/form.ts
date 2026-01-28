@@ -4,6 +4,32 @@ export type MediumOfStudy = "hindi" | "english";
 
 export type FileUploadType = "pdf" | "images";
 
+// Evaluation types
+export interface SubjectSubmission {
+  subjectCode: string;
+  fileType: FileUploadType;
+  fileUrls: string[];
+  submittedAt: string;
+  // Evaluation fields (added when teacher checks)
+  checkedFileUrl?: string;
+  checkedAt?: string;
+  marksObtained?: number;
+  marksTotal?: number;
+}
+
+export interface StudentRecord {
+  studentId: string;
+  studentName: string;
+  mobileNumber: string;
+  mediumOfStudy: MediumOfStudy;
+  admitCardNumber?: string;
+  admitCardFileUrl?: string;
+  arivihanSubjects: SubjectSubmission[];
+  ownSubjects: SubjectSubmission[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Subject {
   code: string;
   nameEn: string;

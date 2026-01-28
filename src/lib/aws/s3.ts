@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const s3Client = new S3Client({
@@ -39,4 +39,20 @@ export async function generatePresignedUploadUrl(
 export function getFileUrl(key: string): string {
   const fullKey = getFullKey(key);
   return `https://${BUCKET_NAME}.s3.${process.env.APP_AWS_REGION || "ap-south-1"}.amazonaws.com/${fullKey}`;
+}
+
+export async function generatePresignedDownloadUrl(
+  fileUrl: string,
+  expiresIn: number = 3600
+): Promise<string> {
+  // Extract the key from the full S3 URL
+  const url = new URL(fileUrl);
+  const key = decodeURIComponent(url.pathname.slice(1)); // Remove leading '/'
+
+  const command = new GetObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+  });
+
+  return await getSignedUrl(s3Client, command, { expiresIn });
 }

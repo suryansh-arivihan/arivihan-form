@@ -28,6 +28,7 @@ interface Filters {
   search: string;
   submissionType: "all" | "arivihan" | "own";
   subject: string;
+  medium: "all" | "hindi" | "english";
 }
 
 const ITEMS_PER_PAGE = 15;
@@ -89,6 +90,7 @@ export default function EvaluationPage() {
     search: "",
     submissionType: "all",
     subject: "all",
+    medium: "all",
   });
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -165,6 +167,11 @@ export default function EvaluationPage() {
       });
     }
 
+    // Medium filter
+    if (filters.medium !== "all") {
+      result = result.filter((s) => s.mediumOfStudy === filters.medium);
+    }
+
     setFilteredSubmissions(result);
     setCurrentPage(1);
   }, [submissions, filters]);
@@ -235,8 +242,8 @@ export default function EvaluationPage() {
           </div>
 
           <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/60 mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[1, 2, 3].map((i) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[1, 2, 3, 4].map((i) => (
                 <div key={i} className="h-11 skeleton rounded-xl" />
               ))}
             </div>
@@ -316,7 +323,7 @@ export default function EvaluationPage() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* Filters */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Search */}
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
@@ -367,6 +374,29 @@ export default function EvaluationPage() {
                     {subject.nameEn}
                   </option>
                 ))}
+              </select>
+              <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </div>
+            </div>
+
+            {/* Medium */}
+            <div className="relative">
+              <select
+                value={filters.medium}
+                onChange={(e) =>
+                  setFilters((f) => ({
+                    ...f,
+                    medium: e.target.value as Filters["medium"],
+                  }))
+                }
+                className="w-full px-4 py-2.5 bg-slate-50 border-0 rounded-xl text-slate-900 focus:ring-2 focus:ring-purple-500/20 focus:bg-white transition-all appearance-none cursor-pointer"
+              >
+                <option value="all">All Mediums</option>
+                <option value="hindi">Hindi Medium</option>
+                <option value="english">English Medium</option>
               </select>
               <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
                 <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
