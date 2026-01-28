@@ -107,6 +107,8 @@ export default function PdfAnnotationEditor({
         const ratio = currentDistance / lastPinchDistance.current;
         // Apply incremental change to current scale
         const newScale = Math.min(3, Math.max(0.1, currentScaleRef.current * ratio));
+        // Update ref immediately (don't wait for effect)
+        currentScaleRef.current = newScale;
         setScale(newScale);
         // Update last distance for next move
         lastPinchDistance.current = currentDistance;
