@@ -223,9 +223,13 @@ export default function PdfAnnotationEditor({
     if (tool === "pointer" && e.touches.length === 2 && lastPinchDistance.current !== null) {
       e.preventDefault();
       const currentDistance = getDistance(e.touches);
-      const pinchRatio = currentDistance / lastPinchDistance.current;
-      const newScale = Math.min(3, Math.max(0.1, lastScale.current * pinchRatio));
+      const delta = currentDistance - lastPinchDistance.current;
+      // More responsive: directly adjust scale based on pixel movement
+      // ~200px pinch movement = 1x scale change
+      const sensitivity = 0.005;
+      const newScale = Math.min(3, Math.max(0.1, scale + delta * sensitivity));
       setScale(newScale);
+      lastPinchDistance.current = currentDistance;
     }
   };
 
