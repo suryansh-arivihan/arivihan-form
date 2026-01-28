@@ -66,7 +66,7 @@ export default function PdfAnnotationEditor({
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const lastPinchDistance = useRef<number | null>(null);
-  const lastScale = useRef<number>(scale);
+  const pinchStartScale = useRef<number>(0.5);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -214,22 +214,22 @@ export default function PdfAnnotationEditor({
   const handleContainerTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     if (tool === "pointer" && e.touches.length === 2) {
       e.preventDefault();
+      e.stopPropagation();
       lastPinchDistance.current = getDistance(e.touches);
-      lastScale.current = scale;
+      pinchStartScale.current = scale;
     }
   };
 
   const handleContainerTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
     if (tool === "pointer" && e.touches.length === 2 && lastPinchDistance.current !== null) {
       e.preventDefault();
+      e.stopPropagation();
       const currentDistance = getDistance(e.touches);
-      const delta = currentDistance - lastPinchDistance.current;
-      // More responsive: directly adjust scale based on pixel movement
-      // ~200px pinch movement = 1x scale change
-      const sensitivity = 0.005;
-      const newScale = Math.min(3, Math.max(0.1, scale + delta * sensitivity));
+      // Ratio: how much fingers have spread/pinched relative to start
+      const ratio = currentDistance / lastPinchDistance.current;
+      // Apply ratio to the scale we had when pinch started
+      const newScale = Math.min(3, Math.max(0.1, pinchStartScale.current * ratio));
       setScale(newScale);
-      lastPinchDistance.current = currentDistance;
     }
   };
 
