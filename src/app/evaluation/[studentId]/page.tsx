@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { SUBJECTS } from "@/constants/subjects";
@@ -16,6 +16,14 @@ interface EditorState {
   pdfUrl: string;
   subjectCode: string;
   submissionType: SubmissionType;
+}
+
+interface CheckOptionDialog {
+  isOpen: boolean;
+  subjectCode: string;
+  subjectName: string;
+  submissionType: SubmissionType;
+  pdfUrl: string;
 }
 
 // Icons
@@ -82,6 +90,33 @@ export default function SubmissionDetailPage() {
     submissionType: "arivihan_model_paper",
   });
   const [signingUrl, setSigningUrl] = useState<string | null>(null);
+  const [checkOptionDialog, setCheckOptionDialog] = useState<CheckOptionDialog>({
+    isOpen: false,
+    subjectCode: "",
+    subjectName: "",
+    submissionType: "arivihan_model_paper",
+    pdfUrl: "",
+  });
+  const [uploadDialog, setUploadDialog] = useState<{
+    isOpen: boolean;
+    subjectCode: string;
+    subjectName: string;
+    submissionType: SubmissionType;
+    file: File | null;
+    marksObtained: string;
+    marksTotal: string;
+    uploading: boolean;
+  }>({
+    isOpen: false,
+    subjectCode: "",
+    subjectName: "",
+    submissionType: "arivihan_model_paper",
+    file: null,
+    marksObtained: "",
+    marksTotal: "",
+    uploading: false,
+  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function fetchSubmission() {
@@ -150,18 +185,100 @@ export default function SubmissionDetailPage() {
     }
   };
 
+  const showCheckOptions = (
+    pdfUrl: string,
+    subjectCode: string,
+    submissionType: "arivihan_model_paper" | "own_question_paper"
+  ) => {
+    setCheckOptionDialog({
+      isOpen: true,
+      subjectCode,
+      subjectName: getSubjectName(subjectCode),
+      submissionType,
+      pdfUrl,
+    });
+  };
+
   const openEditor = (
     pdfUrl: string,
     subjectCode: string,
     submissionType: "arivihan_model_paper" | "own_question_paper"
   ) => {
     const proxyUrl = `/api/evaluation/pdf-proxy?url=${encodeURIComponent(pdfUrl)}`;
+    setCheckOptionDialog((prev) => ({ ...prev, isOpen: false }));
     setEditorState({
       isOpen: true,
       pdfUrl: proxyUrl,
       subjectCode,
       submissionType,
     });
+  };
+
+  const openUploadDialog = () => {
+    setCheckOptionDialog((prev) => ({ ...prev, isOpen: false }));
+    setUploadDialog({
+      isOpen: true,
+      subjectCode: checkOptionDialog.subjectCode,
+      subjectName: checkOptionDialog.subjectName,
+      submissionType: checkOptionDialog.submissionType,
+      file: null,
+      marksObtained: "",
+      marksTotal: "",
+      uploading: false,
+    });
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && file.type === "application/pdf") {
+      setUploadDialog((prev) => ({ ...prev, file }));
+    }
+  };
+
+  const handleUploadCheckedPdf = async () => {
+    if (!uploadDialog.file || !submission) return;
+
+    try {
+      setUploadDialog((prev) => ({ ...prev, uploading: true }));
+
+      const formData = new FormData();
+      formData.append("file", uploadDialog.file, "answer_sheet_checked.pdf");
+      formData.append("studentId", submission.studentId);
+      formData.append("subjectCode", uploadDialog.subjectCode);
+      formData.append("submissionType", uploadDialog.submissionType);
+      if (uploadDialog.marksObtained.trim()) {
+        formData.append("marksObtained", uploadDialog.marksObtained);
+      }
+      if (uploadDialog.marksTotal.trim()) {
+        formData.append("marksTotal", uploadDialog.marksTotal);
+      }
+
+      const response = await fetch("/api/evaluation/upload-checked", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to upload PDF");
+      }
+
+      // Refresh submission data
+      const refreshResponse = await fetch(
+        `/api/evaluation/submissions/${encodeURIComponent(submission.studentId)}`
+      );
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        setSubmission(data.submission);
+      }
+
+      alert("Checked answer sheet uploaded successfully!");
+      setUploadDialog((prev) => ({ ...prev, isOpen: false }));
+    } catch (error) {
+      alert(`Failed to upload: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setUploadDialog((prev) => ({ ...prev, uploading: false }));
+    }
   };
 
   const closeEditor = () => {
@@ -385,9 +502,9 @@ export default function SubmissionDetailPage() {
             )}
           </div>
 
-          {sub.fileUrls.length > 0 && sub.fileUrls[0].endsWith(".pdf") && (
+          {sub.fileUrls.length > 0 && (
             <button
-              onClick={() => openEditor(sub.fileUrls[0], sub.subjectCode, submissionType)}
+              onClick={() => showCheckOptions(sub.fileUrls[0], sub.subjectCode, submissionType)}
               className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
                 isChecked
                   ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300"
@@ -417,6 +534,161 @@ export default function SubmissionDetailPage() {
           onClose={closeEditor}
           subjectName={getSubjectName(editorState.subjectCode)}
         />
+      )}
+
+      {/* Check Option Dialog */}
+      {checkOptionDialog.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">
+              Check Answer Sheet
+            </h3>
+            <p className="text-sm text-slate-500 mb-6">{checkOptionDialog.subjectName}</p>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => openEditor(checkOptionDialog.pdfUrl, checkOptionDialog.subjectCode, checkOptionDialog.submissionType)}
+                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-slate-200 hover:border-purple-300 hover:bg-purple-50/50 transition-all text-left group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-200 transition-colors">
+                  <PencilIcon />
+                </div>
+                <div>
+                  <p className="font-medium text-slate-900">Check here</p>
+                  <p className="text-sm text-slate-500">Annotate the PDF in the browser</p>
+                </div>
+              </button>
+
+              <button
+                onClick={openUploadDialog}
+                className="w-full flex items-center gap-4 p-4 rounded-xl border-2 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/50 transition-all text-left group"
+              >
+                <div className="w-12 h-12 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 group-hover:bg-emerald-200 transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="font-medium text-slate-900">Upload checked PDF</p>
+                  <p className="text-sm text-slate-500">Upload an already checked answer sheet</p>
+                </div>
+              </button>
+            </div>
+
+            <button
+              onClick={() => setCheckOptionDialog((prev) => ({ ...prev, isOpen: false }))}
+              className="w-full mt-4 px-4 py-2.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-xl font-medium transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Checked PDF Dialog */}
+      {uploadDialog.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">
+              Upload Checked PDF
+            </h3>
+            <p className="text-sm text-slate-500 mb-6">{uploadDialog.subjectName}</p>
+
+            {/* File Upload */}
+            <div className="mb-6">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/pdf"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className={`w-full p-6 rounded-xl border-2 border-dashed transition-all ${
+                  uploadDialog.file
+                    ? "border-emerald-300 bg-emerald-50"
+                    : "border-slate-300 hover:border-slate-400 hover:bg-slate-50"
+                }`}
+              >
+                {uploadDialog.file ? (
+                  <div className="flex items-center justify-center gap-3">
+                    <svg className="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div className="text-left">
+                      <p className="font-medium text-slate-900 truncate max-w-[200px]">{uploadDialog.file.name}</p>
+                      <p className="text-sm text-slate-500">{(uploadDialog.file.size / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <svg className="w-10 h-10 text-slate-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                    <p className="font-medium text-slate-700">Click to select PDF</p>
+                    <p className="text-sm text-slate-500">or drag and drop</p>
+                  </div>
+                )}
+              </button>
+            </div>
+
+            {/* Marks Input */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Marks (optional)</label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    value={uploadDialog.marksObtained}
+                    onChange={(e) => setUploadDialog((prev) => ({ ...prev, marksObtained: e.target.value }))}
+                    placeholder="Obtained"
+                    className="w-full px-3 py-2 text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                </div>
+                <span className="text-xl text-slate-400">/</span>
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min="1"
+                    value={uploadDialog.marksTotal}
+                    onChange={(e) => setUploadDialog((prev) => ({ ...prev, marksTotal: e.target.value }))}
+                    placeholder="Total"
+                    className="w-full px-3 py-2 text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUploadDialog((prev) => ({ ...prev, isOpen: false }))}
+                className="flex-1 px-4 py-2.5 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUploadCheckedPdf}
+                disabled={!uploadDialog.file || uploadDialog.uploading}
+                className="flex-1 px-4 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {uploadDialog.uploading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Uploading...
+                  </>
+                ) : (
+                  "Upload"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-slate-50">
