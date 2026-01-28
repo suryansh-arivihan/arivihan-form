@@ -65,6 +65,8 @@ export default function PdfAnnotationEditor({
 
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastPinchDistance = useRef<number | null>(null);
+  const lastScale = useRef<number>(scale);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -73,6 +75,22 @@ export default function PdfAnnotationEditor({
       .then((bytes) => setPdfBytes(bytes))
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
+
+  // Prevent default browser zoom when in pointer mode
+  useEffect(() => {
+    const preventZoom = (e: TouchEvent) => {
+      if (tool === "pointer" && e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+
+    // Add passive: false to allow preventDefault
+    document.addEventListener("touchmove", preventZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener("touchmove", preventZoom);
+    };
+  }, [tool]);
 
   const getCanvasCoordinates = (
     clientX: number,
@@ -184,6 +202,35 @@ export default function PdfAnnotationEditor({
     if (tool === "pointer") return;
     stopDrawing(pageNumber);
     setCursorPos((prev) => ({ ...prev, visible: false }));
+  };
+
+  // Pinch zoom handlers for the container
+  const getDistance = (touches: React.TouchList): number => {
+    const t1 = touches[0];
+    const t2 = touches[1];
+    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+  };
+
+  const handleContainerTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (tool === "pointer" && e.touches.length === 2) {
+      e.preventDefault();
+      lastPinchDistance.current = getDistance(e.touches);
+      lastScale.current = scale;
+    }
+  };
+
+  const handleContainerTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (tool === "pointer" && e.touches.length === 2 && lastPinchDistance.current !== null) {
+      e.preventDefault();
+      const currentDistance = getDistance(e.touches);
+      const pinchRatio = currentDistance / lastPinchDistance.current;
+      const newScale = Math.min(3, Math.max(0.1, lastScale.current * pinchRatio));
+      setScale(newScale);
+    }
+  };
+
+  const handleContainerTouchEnd = () => {
+    lastPinchDistance.current = null;
   };
 
   const stopDrawing = (pageNumber: number) => {
@@ -545,7 +592,10 @@ export default function PdfAnnotationEditor({
       {/* PDF Viewer */}
       <div
         ref={containerRef}
-        className="flex-1 overflow-auto bg-gray-700 p-4 relative"
+        className={`flex-1 overflow-auto bg-gray-700 p-4 relative ${tool === "pointer" ? "touch-pan-x touch-pan-y" : ""}`}
+        onTouchStart={handleContainerTouchStart}
+        onTouchMove={handleContainerTouchMove}
+        onTouchEnd={handleContainerTouchEnd}
       >
         <PdfViewer
           pdfUrl={pdfUrl}
