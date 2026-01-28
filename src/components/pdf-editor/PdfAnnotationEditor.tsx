@@ -43,7 +43,7 @@ export default function PdfAnnotationEditor({
   onClose,
   subjectName,
 }: PdfAnnotationEditorProps) {
-  const [numPages, setNumPages] = useState<number>(0);
+  const [, setNumPages] = useState<number>(0);
   const [scale, setScale] = useState(0.5);
   const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
   const [color, setColor] = useState("#e53935");
@@ -53,7 +53,7 @@ export default function PdfAnnotationEditor({
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
   const [saving, setSaving] = useState(false);
   const [pdfBytes, setPdfBytes] = useState<ArrayBuffer | null>(null);
-  const [pageDimensions, setPageDimensions] = useState<{ [key: number]: PageDimensions }>({})
+  const [, setPageDimensions] = useState<{ [key: number]: PageDimensions }>({})
   const [marksObtained, setMarksObtained] = useState<string>("");
   const [marksTotal, setMarksTotal] = useState<string>("");
   const [showMarksDialog, setShowMarksDialog] = useState(false);
@@ -76,19 +76,49 @@ export default function PdfAnnotationEditor({
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
 
-  // Prevent default browser zoom when in pointer mode
+  // Pinch zoom using native event listeners for smoother experience
   useEffect(() => {
-    const preventZoom = (e: TouchEvent) => {
-      if (tool === "pointer" && e.touches.length > 1) {
+    const container = containerRef.current;
+    if (!container || tool !== "pointer") return;
+
+    const getDistance = (touches: TouchList): number => {
+      const t1 = touches[0];
+      const t2 = touches[1];
+      return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+    };
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
         e.preventDefault();
+        lastPinchDistance.current = getDistance(e.touches);
+        pinchStartScale.current = parseFloat(container.dataset.scale || "0.5");
       }
     };
 
-    // Add passive: false to allow preventDefault
-    document.addEventListener("touchmove", preventZoom, { passive: false });
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && lastPinchDistance.current !== null) {
+        e.preventDefault();
+        const currentDistance = getDistance(e.touches);
+        const ratio = currentDistance / lastPinchDistance.current;
+        const newScale = Math.min(3, Math.max(0.1, pinchStartScale.current * ratio));
+        setScale(newScale);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      lastPinchDistance.current = null;
+    };
+
+    container.addEventListener("touchstart", handleTouchStart, { passive: false });
+    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+    container.addEventListener("touchend", handleTouchEnd);
+    container.addEventListener("touchcancel", handleTouchEnd);
 
     return () => {
-      document.removeEventListener("touchmove", preventZoom);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
     };
   }, [tool]);
 
@@ -204,39 +234,6 @@ export default function PdfAnnotationEditor({
     setCursorPos((prev) => ({ ...prev, visible: false }));
   };
 
-  // Pinch zoom handlers for the container
-  const getDistance = (touches: React.TouchList): number => {
-    const t1 = touches[0];
-    const t2 = touches[1];
-    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-  };
-
-  const handleContainerTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (tool === "pointer" && e.touches.length === 2) {
-      e.preventDefault();
-      e.stopPropagation();
-      lastPinchDistance.current = getDistance(e.touches);
-      pinchStartScale.current = scale;
-    }
-  };
-
-  const handleContainerTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
-    if (tool === "pointer" && e.touches.length === 2 && lastPinchDistance.current !== null) {
-      e.preventDefault();
-      e.stopPropagation();
-      const currentDistance = getDistance(e.touches);
-      // Ratio: how much fingers have spread/pinched relative to start
-      const ratio = currentDistance / lastPinchDistance.current;
-      // Apply ratio to the scale we had when pinch started
-      const newScale = Math.min(3, Math.max(0.1, pinchStartScale.current * ratio));
-      setScale(newScale);
-    }
-  };
-
-  const handleContainerTouchEnd = () => {
-    lastPinchDistance.current = null;
-  };
-
   const stopDrawing = (pageNumber: number) => {
     if (!isDrawing || !currentStroke) return;
 
@@ -292,20 +289,6 @@ export default function PdfAnnotationEditor({
     });
   }, [annotations, redrawCanvas]);
 
-  const clearPage = (pageNumber: number) => {
-    setAnnotations((prev) => ({
-      ...prev,
-      [pageNumber]: [],
-    }));
-    const canvas = canvasRefs.current[pageNumber];
-    if (canvas) {
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
-    }
-  };
-
   const clearAll = () => {
     setAnnotations({});
     Object.keys(canvasRefs.current).forEach((key) => {
@@ -357,7 +340,6 @@ export default function PdfAnnotationEditor({
       // Draw annotations on each page
       for (const [pageNumStr, strokes] of Object.entries(annotations)) {
         const pageIndex = parseInt(pageNumStr) - 1;
-        const pageNumber = parseInt(pageNumStr);
         if (pageIndex < 0 || pageIndex >= pages.length) continue;
 
         const page = pages[pageIndex];
@@ -596,10 +578,8 @@ export default function PdfAnnotationEditor({
       {/* PDF Viewer */}
       <div
         ref={containerRef}
+        data-scale={scale}
         className={`flex-1 overflow-auto bg-gray-700 p-4 relative ${tool === "pointer" ? "touch-pan-x touch-pan-y" : ""}`}
-        onTouchStart={handleContainerTouchStart}
-        onTouchMove={handleContainerTouchMove}
-        onTouchEnd={handleContainerTouchEnd}
       >
         <PdfViewer
           pdfUrl={pdfUrl}
