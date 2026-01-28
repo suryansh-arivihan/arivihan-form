@@ -66,7 +66,7 @@ export default function PdfAnnotationEditor({
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const lastPinchDistance = useRef<number | null>(null);
-  const pinchStartScale = useRef<number>(0.5);
+  const currentScaleRef = useRef<number>(0.5);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -75,6 +75,11 @@ export default function PdfAnnotationEditor({
       .then((bytes) => setPdfBytes(bytes))
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
+
+  // Keep scale ref in sync
+  useEffect(() => {
+    currentScaleRef.current = scale;
+  }, [scale]);
 
   // Pinch zoom using native event listeners for smoother experience
   useEffect(() => {
@@ -91,7 +96,6 @@ export default function PdfAnnotationEditor({
       if (e.touches.length === 2) {
         e.preventDefault();
         lastPinchDistance.current = getDistance(e.touches);
-        pinchStartScale.current = parseFloat(container.dataset.scale || "0.5");
       }
     };
 
@@ -99,9 +103,13 @@ export default function PdfAnnotationEditor({
       if (e.touches.length === 2 && lastPinchDistance.current !== null) {
         e.preventDefault();
         const currentDistance = getDistance(e.touches);
+        // Calculate incremental ratio from last position
         const ratio = currentDistance / lastPinchDistance.current;
-        const newScale = Math.min(3, Math.max(0.1, pinchStartScale.current * ratio));
+        // Apply incremental change to current scale
+        const newScale = Math.min(3, Math.max(0.1, currentScaleRef.current * ratio));
         setScale(newScale);
+        // Update last distance for next move
+        lastPinchDistance.current = currentDistance;
       }
     };
 
@@ -578,7 +586,6 @@ export default function PdfAnnotationEditor({
       {/* PDF Viewer */}
       <div
         ref={containerRef}
-        data-scale={scale}
         className={`flex-1 overflow-auto bg-gray-700 p-4 relative ${tool === "pointer" ? "touch-pan-x touch-pan-y" : ""}`}
       >
         <PdfViewer
