@@ -13,7 +13,7 @@ interface Stroke {
   points: Point[];
   color: string;
   width: number;
-  tool: "pen" | "eraser";
+  tool: "pen" | "eraser" | "pointer";
 }
 
 interface PageAnnotations {
@@ -45,7 +45,7 @@ export default function PdfAnnotationEditor({
 }: PdfAnnotationEditorProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [scale, setScale] = useState(0.5);
-  const [tool, setTool] = useState<"pen" | "eraser">("pen");
+  const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
   const [color, setColor] = useState("#e53935");
   const [strokeWidth, setStrokeWidth] = useState(3);
   const [annotations, setAnnotations] = useState<PageAnnotations>({});
@@ -93,6 +93,8 @@ export default function PdfAnnotationEditor({
     clientY: number,
     pageNumber: number
   ) => {
+    if (tool === "pointer") return; // Don't draw in pointer mode
+
     const canvas = canvasRefs.current[pageNumber];
     if (!canvas) return;
 
@@ -163,6 +165,7 @@ export default function PdfAnnotationEditor({
 
   // Touch event handlers
   const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>, pageNumber: number) => {
+    if (tool === "pointer") return; // Allow native scroll in pointer mode
     e.preventDefault();
     const touch = e.touches[0];
     startDrawing(touch.clientX, touch.clientY, pageNumber);
@@ -170,6 +173,7 @@ export default function PdfAnnotationEditor({
   };
 
   const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>, pageNumber: number) => {
+    if (tool === "pointer") return; // Allow native scroll in pointer mode
     e.preventDefault();
     const touch = e.touches[0];
     draw(touch.clientX, touch.clientY, pageNumber);
@@ -177,6 +181,7 @@ export default function PdfAnnotationEditor({
   };
 
   const handleTouchEnd = (pageNumber: number) => {
+    if (tool === "pointer") return;
     stopDrawing(pageNumber);
     setCursorPos((prev) => ({ ...prev, visible: false }));
   };
@@ -400,10 +405,29 @@ export default function PdfAnnotationEditor({
               }`}
               title="Eraser"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+                <path d="M22 21H7" />
+                <path d="m5 11 9 9" />
               </svg>
               <span className="text-sm hidden sm:inline">Eraser</span>
+            </button>
+
+            {/* Pointer/Hand Tool */}
+            <button
+              onClick={() => setTool("pointer")}
+              className={`p-2 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-1 sm:gap-2 ${
+                tool === "pointer" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
+              }`}
+              title="Scroll"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+                <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+                <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+              </svg>
+              <span className="text-sm hidden sm:inline">Scroll</span>
             </button>
 
             <div className="h-6 w-px bg-gray-300 hidden sm:block" />
@@ -498,7 +522,7 @@ export default function PdfAnnotationEditor({
           {/* Zoom */}
           <div className="flex items-center gap-1 flex-shrink-0">
             <button
-              onClick={() => setScale((s) => Math.max(0.25, s - 0.25))}
+              onClick={() => setScale((s) => Math.max(0.1, s - 0.1))}
               className="p-1.5 sm:p-1 hover:bg-gray-100 rounded"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -507,7 +531,7 @@ export default function PdfAnnotationEditor({
             </button>
             <span className="text-xs sm:text-sm w-10 sm:w-12 text-center">{Math.round(scale * 100)}%</span>
             <button
-              onClick={() => setScale((s) => Math.min(3, s + 0.25))}
+              onClick={() => setScale((s) => Math.min(3, s + 0.1))}
               className="p-1.5 sm:p-1 hover:bg-gray-100 rounded"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -547,11 +571,12 @@ export default function PdfAnnotationEditor({
               ref={(el) => {
                 canvasRefs.current[pageNumber] = el;
               }}
-              className="absolute top-0 left-0 touch-none"
+              className={`absolute top-0 left-0 ${tool === "pointer" ? "touch-auto" : "touch-none"}`}
               style={{
                 width: "100%",
                 height: "100%",
-                cursor: "none",
+                cursor: tool === "pointer" ? "grab" : "none",
+                pointerEvents: tool === "pointer" ? "none" : "auto",
               }}
               // Mouse events
               onMouseDown={(e) => handleMouseDown(e, pageNumber)}
@@ -574,7 +599,7 @@ export default function PdfAnnotationEditor({
         </PdfViewer>
 
         {/* Brush Preview Cursor */}
-        {cursorPos.visible && (() => {
+        {cursorPos.visible && tool !== "pointer" && (() => {
           // Calculate preview size based on stroke width and scale
           const baseSize = tool === "eraser" ? strokeWidth * 3 : strokeWidth;
           const previewSize = Math.max(8, baseSize * scale * 1.5);
