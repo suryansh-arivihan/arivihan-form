@@ -53,6 +53,12 @@ export default function StudentInfoSection({
   isUploading = false,
   isCheckingQuota = false,
 }: StudentInfoSectionProps) {
+  const handleStudentNameChange = (value: string) => {
+    // Only allow alphabetic characters (a-z, A-Z) and spaces
+    const filteredValue = value.replace(/[^a-zA-Z\s]/g, "");
+    onStudentNameChange(filteredValue);
+  };
+
   const handleMobileChange = (value: string) => {
     const numericValue = value.replace(/\D/g, "").slice(0, 10);
     onMobileNumberChange(numericValue);
@@ -91,7 +97,7 @@ export default function StudentInfoSection({
         label={MESSAGES.studentName}
         name="studentName"
         value={studentName}
-        onChange={onStudentNameChange}
+        onChange={handleStudentNameChange}
         onBlur={onStudentNameBlur}
         placeholder={MESSAGES.studentNamePlaceholder}
         required

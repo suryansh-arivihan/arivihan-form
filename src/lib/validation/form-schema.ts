@@ -3,9 +3,11 @@ import { MESSAGES } from "@/constants/messages";
 
 export const studentNameSchema = z
   .string()
+  .trim()
   .min(1, MESSAGES.errors.nameRequired)
   .min(2, MESSAGES.errors.nameMinLength)
-  .max(100, MESSAGES.errors.nameMaxLength);
+  .max(100, MESSAGES.errors.nameMaxLength)
+  .regex(/[a-zA-Z]/, MESSAGES.errors.nameInvalid);
 
 export const mobileNumberSchema = z
   .string()

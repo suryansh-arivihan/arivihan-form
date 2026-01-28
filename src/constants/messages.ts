@@ -75,6 +75,7 @@ export const MESSAGES = {
     nameRequired: "कृपया अपना नाम भरें / Please enter your name",
     nameMinLength: "नाम कम से कम 2 अक्षर का होना चाहिए / Name must be at least 2 characters",
     nameMaxLength: "नाम 100 अक्षरों से अधिक नहीं होना चाहिए / Name cannot exceed 100 characters",
+    nameInvalid: "नाम में कम से कम एक अक्षर होना चाहिए / Name must contain at least one letter",
     mobileRequired: "कृपया मोबाइल नंबर भरें / Please enter mobile number",
     mobileInvalid: "कृपया सही 10 अंकों का मोबाइल नंबर भरें / Please enter valid 10-digit mobile number",
     mediumRequired: "कृपया अध्ययन का माध्यम चुनें / Please select medium of study",
