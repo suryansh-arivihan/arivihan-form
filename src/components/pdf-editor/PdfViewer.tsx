@@ -99,6 +99,8 @@ export default function PdfViewer({
               scale={scale}
               renderTextLayer={false}
               renderAnnotationLayer={false}
+              // Limit pixel ratio on mobile to reduce memory usage
+              devicePixelRatio={Math.min(window.devicePixelRatio || 1, 2)}
               onRenderSuccess={() => {
                 const parent = canvasRefs.current[pageNumber]?.parentElement;
                 if (parent) {
@@ -107,6 +109,9 @@ export default function PdfViewer({
                     onPageRender(pageNumber, pageCanvas);
                   }
                 }
+              }}
+              onRenderError={(error) => {
+                console.error(`Error rendering page ${pageNumber}:`, error);
               }}
             />
             {children(pageNumber)}
