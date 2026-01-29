@@ -68,6 +68,7 @@ export default function PdfAnnotationEditor({
   const contentRef = useRef<HTMLDivElement>(null);
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const visualScaleRef = useRef<number>(0.5);
+  const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const pinchState = useRef<{
     active: boolean;
     initialDistance: number;
@@ -116,6 +117,19 @@ export default function PdfAnnotationEditor({
           renderTimeoutRef.current = null;
         }
 
+        // Calculate pinch center relative to container
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const centerX = (t1.clientX + t2.clientX) / 2;
+        const centerY = (t1.clientY + t2.clientY) / 2;
+        const containerRect = container.getBoundingClientRect();
+
+        // Store center relative to content (accounting for scroll)
+        pinchCenterRef.current = {
+          x: centerX - containerRect.left + container.scrollLeft,
+          y: centerY - containerRect.top + container.scrollTop,
+        };
+
         // Use visual scale if we haven't rendered yet, otherwise use actual scale
         const startScale = visualScaleRef.current !== scale ? visualScaleRef.current : scale;
 
@@ -126,6 +140,7 @@ export default function PdfAnnotationEditor({
           currentTransform: 1,
         };
         content.style.transition = "none";
+        content.style.filter = "none";
       }
     };
 
@@ -160,28 +175,47 @@ export default function PdfAnnotationEditor({
 
         // Store the visual scale and keep CSS transform active
         visualScaleRef.current = finalScale;
-        const transformRatio = finalScale / scale; // ratio relative to current PDF render
+        const transformRatio = finalScale / scale;
+        const scaleChange = finalScale / scale;
+
+        // Calculate scroll adjustment to maintain focal point
+        const focalX = pinchCenterRef.current.x;
+        const focalY = pinchCenterRef.current.y;
+        const newScrollLeft = focalX * scaleChange - (focalX - container.scrollLeft);
+        const newScrollTop = focalY * scaleChange - (focalY - container.scrollTop);
 
         // Keep showing the CSS transform (don't reset yet)
         content.style.transition = "none";
         content.style.transform = `scale(${transformRatio})`;
         content.style.transformOrigin = "center top";
 
+        // Subtle indicator that we're waiting to render
+        content.style.filter = "brightness(0.97)";
+
         // Clear any pending render
         if (renderTimeoutRef.current) {
           clearTimeout(renderTimeoutRef.current);
         }
 
-        // Debounce: only re-render PDF after 400ms of no pinching
+        // Debounce: only re-render PDF after 250ms of no pinching
         renderTimeoutRef.current = setTimeout(() => {
-          // Now render at full quality
+          // Reset filter
+          content.style.filter = "none";
+
+          // Render at full quality
           setScale(finalScale);
-          // Reset transform after state update
+
+          // Adjust scroll position to maintain focal point
           requestAnimationFrame(() => {
-            content.style.transition = "transform 0.15s ease-out";
-            content.style.transform = "scale(1)";
+            container.scrollLeft = Math.max(0, newScrollLeft);
+            container.scrollTop = Math.max(0, newScrollTop);
+
+            requestAnimationFrame(() => {
+              content.style.transition = "transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)";
+              content.style.transform = "scale(1)";
+            });
           });
-        }, 400);
+        }, 250);
 
         pinchState.current.active = false;
         pinchState.current.currentTransform = 1;
