@@ -65,8 +65,18 @@ export default function PdfAnnotationEditor({
 
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastPinchDistance = useRef<number | null>(null);
-  const currentScaleRef = useRef<number>(0.5);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pinchState = useRef<{
+    active: boolean;
+    initialDistance: number;
+    initialScale: number;
+    currentTransform: number;
+  }>({
+    active: false,
+    initialDistance: 0,
+    initialScale: 0.5,
+    currentTransform: 1,
+  });
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -76,47 +86,67 @@ export default function PdfAnnotationEditor({
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
 
-  // Keep scale ref in sync
-  useEffect(() => {
-    currentScaleRef.current = scale;
-  }, [scale]);
-
-  // Pinch zoom using native event listeners for smoother experience
+  // Pinch zoom with CSS transform for smooth visual feedback
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || tool !== "pointer") return;
+    const content = contentRef.current;
+    if (!container || !content || tool !== "pointer") return;
 
     const getDistance = (touches: TouchList): number => {
-      const t1 = touches[0];
-      const t2 = touches[1];
-      return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      return Math.hypot(
+        touches[1].clientX - touches[0].clientX,
+        touches[1].clientY - touches[0].clientY
+      );
     };
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         e.preventDefault();
-        lastPinchDistance.current = getDistance(e.touches);
+        pinchState.current = {
+          active: true,
+          initialDistance: getDistance(e.touches),
+          initialScale: scale,
+          currentTransform: 1,
+        };
+        content.style.transition = "none";
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && lastPinchDistance.current !== null) {
+      if (e.touches.length === 2 && pinchState.current.active) {
         e.preventDefault();
         const currentDistance = getDistance(e.touches);
-        // Calculate incremental ratio from last position
-        const ratio = currentDistance / lastPinchDistance.current;
-        // Apply incremental change to current scale
-        const newScale = Math.min(3, Math.max(0.1, currentScaleRef.current * ratio));
-        // Update ref immediately (don't wait for effect)
-        currentScaleRef.current = newScale;
-        setScale(newScale);
-        // Update last distance for next move
-        lastPinchDistance.current = currentDistance;
+        const ratio = currentDistance / pinchState.current.initialDistance;
+
+        // Clamp the visual transform ratio
+        const minRatio = 0.1 / pinchState.current.initialScale;
+        const maxRatio = 3 / pinchState.current.initialScale;
+        const clampedRatio = Math.min(maxRatio, Math.max(minRatio, ratio));
+
+        pinchState.current.currentTransform = clampedRatio;
+
+        // Apply CSS transform for instant visual feedback (GPU accelerated)
+        content.style.transform = `scale(${clampedRatio})`;
+        content.style.transformOrigin = "center top";
       }
     };
 
     const handleTouchEnd = () => {
-      lastPinchDistance.current = null;
+      if (pinchState.current.active) {
+        const finalScale = Math.min(3, Math.max(0.1,
+          pinchState.current.initialScale * pinchState.current.currentTransform
+        ));
+
+        // Reset transform and apply actual scale
+        content.style.transition = "transform 0.1s ease-out";
+        content.style.transform = "scale(1)";
+
+        // Update the actual PDF scale
+        setScale(finalScale);
+
+        pinchState.current.active = false;
+        pinchState.current.currentTransform = 1;
+      }
     };
 
     container.addEventListener("touchstart", handleTouchStart, { passive: false });
@@ -130,7 +160,7 @@ export default function PdfAnnotationEditor({
       container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("touchcancel", handleTouchEnd);
     };
-  }, [tool]);
+  }, [tool, scale]);
 
   const getCanvasCoordinates = (
     clientX: number,
@@ -590,6 +620,7 @@ export default function PdfAnnotationEditor({
         ref={containerRef}
         className={`flex-1 overflow-auto bg-gray-700 p-4 relative ${tool === "pointer" ? "touch-pan-x touch-pan-y" : ""}`}
       >
+        <div ref={contentRef} className="will-change-transform">
         <PdfViewer
           pdfUrl={pdfUrl}
           scale={scale}
@@ -640,6 +671,7 @@ export default function PdfAnnotationEditor({
             />
           )}
         </PdfViewer>
+        </div>
 
         {/* Brush Preview Cursor */}
         {cursorPos.visible && tool !== "pointer" && (() => {
