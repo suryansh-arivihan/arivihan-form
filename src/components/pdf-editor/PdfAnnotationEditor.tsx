@@ -140,7 +140,6 @@ export default function PdfAnnotationEditor({
           currentTransform: 1,
         };
         content.style.transition = "none";
-        content.style.filter = "none";
       }
     };
 
@@ -149,6 +148,17 @@ export default function PdfAnnotationEditor({
         e.preventDefault();
         const currentDistance = getDistance(e.touches);
         const ratio = currentDistance / pinchState.current.initialDistance;
+
+        // Update pinch center continuously
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const centerX = (t1.clientX + t2.clientX) / 2;
+        const centerY = (t1.clientY + t2.clientY) / 2;
+        const containerRect = container.getBoundingClientRect();
+        pinchCenterRef.current = {
+          x: centerX - containerRect.left + container.scrollLeft,
+          y: centerY - containerRect.top + container.scrollTop,
+        };
 
         // Clamp the visual transform ratio
         const minRatio = 0.1 / pinchState.current.initialScale;
@@ -161,9 +171,13 @@ export default function PdfAnnotationEditor({
         const visualScale = pinchState.current.initialScale * clampedRatio;
         const cssTransform = visualScale / scale;
 
+        // Use pinch center as transform origin for more natural feel
+        const originX = centerX - containerRect.left;
+        const originY = centerY - containerRect.top + container.scrollTop;
+
         // Apply CSS transform for instant visual feedback (GPU accelerated)
+        content.style.transformOrigin = `${originX}px ${originY}px`;
         content.style.transform = `scale(${cssTransform})`;
-        content.style.transformOrigin = "center top";
       }
     };
 
@@ -187,21 +201,15 @@ export default function PdfAnnotationEditor({
         // Keep showing the CSS transform (don't reset yet)
         content.style.transition = "none";
         content.style.transform = `scale(${transformRatio})`;
-        content.style.transformOrigin = "center top";
-
-        // Subtle indicator that we're waiting to render
-        content.style.filter = "brightness(0.97)";
+        // Keep the transform origin from the last pinch position
 
         // Clear any pending render
         if (renderTimeoutRef.current) {
           clearTimeout(renderTimeoutRef.current);
         }
 
-        // Debounce: only re-render PDF after 250ms of no pinching
+        // Debounce: only re-render PDF after 200ms of no pinching
         renderTimeoutRef.current = setTimeout(() => {
-          // Reset filter
-          content.style.filter = "none";
-
           // Render at full quality
           setScale(finalScale);
 
