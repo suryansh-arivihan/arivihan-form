@@ -66,6 +66,8 @@ export default function PdfAnnotationEditor({
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const visualScaleRef = useRef<number>(0.5);
   const pinchState = useRef<{
     active: boolean;
     initialDistance: number;
@@ -86,6 +88,11 @@ export default function PdfAnnotationEditor({
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
 
+  // Keep visual scale in sync when scale changes (e.g., via buttons)
+  useEffect(() => {
+    visualScaleRef.current = scale;
+  }, [scale]);
+
   // Pinch zoom with CSS transform for smooth visual feedback
   useEffect(() => {
     const container = containerRef.current;
@@ -102,10 +109,20 @@ export default function PdfAnnotationEditor({
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         e.preventDefault();
+
+        // Clear pending render timeout - user is zooming again
+        if (renderTimeoutRef.current) {
+          clearTimeout(renderTimeoutRef.current);
+          renderTimeoutRef.current = null;
+        }
+
+        // Use visual scale if we haven't rendered yet, otherwise use actual scale
+        const startScale = visualScaleRef.current !== scale ? visualScaleRef.current : scale;
+
         pinchState.current = {
           active: true,
           initialDistance: getDistance(e.touches),
-          initialScale: scale,
+          initialScale: startScale,
           currentTransform: 1,
         };
         content.style.transition = "none";
@@ -125,8 +142,12 @@ export default function PdfAnnotationEditor({
 
         pinchState.current.currentTransform = clampedRatio;
 
+        // Calculate CSS transform relative to the currently rendered scale
+        const visualScale = pinchState.current.initialScale * clampedRatio;
+        const cssTransform = visualScale / scale;
+
         // Apply CSS transform for instant visual feedback (GPU accelerated)
-        content.style.transform = `scale(${clampedRatio})`;
+        content.style.transform = `scale(${cssTransform})`;
         content.style.transformOrigin = "center top";
       }
     };
@@ -137,12 +158,30 @@ export default function PdfAnnotationEditor({
           pinchState.current.initialScale * pinchState.current.currentTransform
         ));
 
-        // Reset transform and apply actual scale
-        content.style.transition = "transform 0.1s ease-out";
-        content.style.transform = "scale(1)";
+        // Store the visual scale and keep CSS transform active
+        visualScaleRef.current = finalScale;
+        const transformRatio = finalScale / scale; // ratio relative to current PDF render
 
-        // Update the actual PDF scale
-        setScale(finalScale);
+        // Keep showing the CSS transform (don't reset yet)
+        content.style.transition = "none";
+        content.style.transform = `scale(${transformRatio})`;
+        content.style.transformOrigin = "center top";
+
+        // Clear any pending render
+        if (renderTimeoutRef.current) {
+          clearTimeout(renderTimeoutRef.current);
+        }
+
+        // Debounce: only re-render PDF after 400ms of no pinching
+        renderTimeoutRef.current = setTimeout(() => {
+          // Now render at full quality
+          setScale(finalScale);
+          // Reset transform after state update
+          requestAnimationFrame(() => {
+            content.style.transition = "transform 0.15s ease-out";
+            content.style.transform = "scale(1)";
+          });
+        }, 400);
 
         pinchState.current.active = false;
         pinchState.current.currentTransform = 1;
@@ -544,47 +583,11 @@ export default function PdfAnnotationEditor({
           {/* Spacer to push remaining items */}
           <div className="flex-1" />
 
-          {/* Stroke Width */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            <input
-              type="range"
-              min="1"
-              max="10"
-              value={strokeWidth}
-              onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-              className="w-14"
-            />
-            <span className="text-xs text-gray-600 w-3">{strokeWidth}</span>
-          </div>
-
-          <div className="h-5 w-px bg-gray-200 flex-shrink-0" />
-
-          {/* Zoom */}
-          <div className="flex items-center gap-0.5 flex-shrink-0">
-            <button
-              onClick={() => setScale((s) => Math.max(0.1, s - 0.1))}
-              className="p-1 hover:bg-gray-100 rounded"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-              </svg>
-            </button>
-            <span className="text-xs w-8 text-center">{Math.round(scale * 100)}%</span>
-            <button
-              onClick={() => setScale((s) => Math.min(3, s + 0.1))}
-              className="p-1 hover:bg-gray-100 rounded"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Save Button - always on right */}
+          {/* Save Button - portrait only here */}
           <button
             onClick={() => setShowMarksDialog(true)}
             disabled={saving}
-            className="ml-auto landscape:ml-2 px-2 sm:px-3 py-1.5 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-1.5 text-sm flex-shrink-0"
+            className="landscape:hidden px-2 sm:px-3 py-1.5 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-1.5 text-sm flex-shrink-0"
           >
             {saving ? (
               <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
@@ -596,9 +599,67 @@ export default function PdfAnnotationEditor({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             )}
-            <span className="hidden sm:inline landscape:hidden">{saving ? "Saving..." : "Save & Upload"}</span>
-            <span className="sm:hidden landscape:inline">{saving ? "" : "Save"}</span>
+            <span className="hidden sm:inline">{saving ? "Saving..." : "Save & Upload"}</span>
+            <span className="sm:hidden">{saving ? "" : "Save"}</span>
           </button>
+
+          {/* Second row items - shown inline in landscape */}
+          <div className="flex items-center gap-2 w-full landscape:w-auto pt-1.5 landscape:pt-0 border-t landscape:border-t-0 border-gray-100 mt-1.5 landscape:mt-0 order-last landscape:order-none">
+            {/* Zoom */}
+            <div className="flex items-center gap-0.5 flex-shrink-0">
+              <button
+                onClick={() => setScale((s) => Math.max(0.1, s - 0.1))}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                </svg>
+              </button>
+              <span className="text-xs w-8 text-center">{Math.round(scale * 100)}%</span>
+              <button
+                onClick={() => setScale((s) => Math.min(3, s + 0.1))}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 landscape:hidden" />
+
+            {/* Stroke Width */}
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <input
+                type="range"
+                min="1"
+                max="10"
+                value={strokeWidth}
+                onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
+                className="w-14"
+              />
+              <span className="text-xs text-gray-600 w-3">{strokeWidth}</span>
+            </div>
+
+            {/* Save Button - landscape only here (at end) */}
+            <button
+              onClick={() => setShowMarksDialog(true)}
+              disabled={saving}
+              className="hidden landscape:flex ml-2 px-2 py-1.5 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 items-center gap-1.5 text-sm flex-shrink-0"
+            >
+              {saving ? (
+                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              <span>{saving ? "" : "Save"}</span>
+            </button>
+          </div>
         </div>
       </div>
 
