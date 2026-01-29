@@ -46,8 +46,8 @@ export default function PdfAnnotationEditor({
   const [, setNumPages] = useState<number>(0);
   const [scale, setScale] = useState(0.5);
   const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
-  const [color, setColor] = useState("#e53935");
-  const [strokeWidth, setStrokeWidth] = useState(3);
+  const [color, setColor] = useState("#e53935"); // Red default
+  const [strokeWidth, setStrokeWidth] = useState(2);
   const [annotations, setAnnotations] = useState<PageAnnotations>({});
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
@@ -65,8 +65,18 @@ export default function PdfAnnotationEditor({
 
   const canvasRefs = useRef<{ [key: number]: HTMLCanvasElement | null }>({});
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastPinchDistance = useRef<number | null>(null);
-  const currentScaleRef = useRef<number>(0.5);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const pinchState = useRef<{
+    active: boolean;
+    initialDistance: number;
+    initialScale: number;
+    currentTransform: number;
+  }>({
+    active: false,
+    initialDistance: 0,
+    initialScale: 0.5,
+    currentTransform: 1,
+  });
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -76,47 +86,67 @@ export default function PdfAnnotationEditor({
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
 
-  // Keep scale ref in sync
-  useEffect(() => {
-    currentScaleRef.current = scale;
-  }, [scale]);
-
-  // Pinch zoom using native event listeners for smoother experience
+  // Pinch zoom with CSS transform for smooth visual feedback
   useEffect(() => {
     const container = containerRef.current;
-    if (!container || tool !== "pointer") return;
+    const content = contentRef.current;
+    if (!container || !content || tool !== "pointer") return;
 
     const getDistance = (touches: TouchList): number => {
-      const t1 = touches[0];
-      const t2 = touches[1];
-      return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      return Math.hypot(
+        touches[1].clientX - touches[0].clientX,
+        touches[1].clientY - touches[0].clientY
+      );
     };
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
         e.preventDefault();
-        lastPinchDistance.current = getDistance(e.touches);
+        pinchState.current = {
+          active: true,
+          initialDistance: getDistance(e.touches),
+          initialScale: scale,
+          currentTransform: 1,
+        };
+        content.style.transition = "none";
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && lastPinchDistance.current !== null) {
+      if (e.touches.length === 2 && pinchState.current.active) {
         e.preventDefault();
         const currentDistance = getDistance(e.touches);
-        // Calculate incremental ratio from last position
-        const ratio = currentDistance / lastPinchDistance.current;
-        // Apply incremental change to current scale
-        const newScale = Math.min(3, Math.max(0.1, currentScaleRef.current * ratio));
-        // Update ref immediately (don't wait for effect)
-        currentScaleRef.current = newScale;
-        setScale(newScale);
-        // Update last distance for next move
-        lastPinchDistance.current = currentDistance;
+        const ratio = currentDistance / pinchState.current.initialDistance;
+
+        // Clamp the visual transform ratio
+        const minRatio = 0.1 / pinchState.current.initialScale;
+        const maxRatio = 3 / pinchState.current.initialScale;
+        const clampedRatio = Math.min(maxRatio, Math.max(minRatio, ratio));
+
+        pinchState.current.currentTransform = clampedRatio;
+
+        // Apply CSS transform for instant visual feedback (GPU accelerated)
+        content.style.transform = `scale(${clampedRatio})`;
+        content.style.transformOrigin = "center top";
       }
     };
 
     const handleTouchEnd = () => {
-      lastPinchDistance.current = null;
+      if (pinchState.current.active) {
+        const finalScale = Math.min(3, Math.max(0.1,
+          pinchState.current.initialScale * pinchState.current.currentTransform
+        ));
+
+        // Reset transform and apply actual scale
+        content.style.transition = "transform 0.1s ease-out";
+        content.style.transform = "scale(1)";
+
+        // Update the actual PDF scale
+        setScale(finalScale);
+
+        pinchState.current.active = false;
+        pinchState.current.currentTransform = 1;
+      }
     };
 
     container.addEventListener("touchstart", handleTouchStart, { passive: false });
@@ -130,7 +160,7 @@ export default function PdfAnnotationEditor({
       container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("touchcancel", handleTouchEnd);
     };
-  }, [tool]);
+  }, [tool, scale]);
 
   const getCanvasCoordinates = (
     clientX: number,
@@ -401,187 +431,174 @@ export default function PdfAnnotationEditor({
   const colors = [
     { name: "Red", value: "#e53935" },
     { name: "Green", value: "#43a047" },
-    { name: "Blue", value: "#1e88e5" },
     { name: "Black", value: "#212121" },
-    { name: "Orange", value: "#fb8c00" },
   ];
 
   return (
     <div className="fixed inset-0 z-50 bg-gray-900 flex flex-col">
-      {/* Toolbar - Mobile Optimized */}
+      {/* Toolbar - Responsive: Single row in landscape, two rows in portrait */}
       <div className="bg-white border-b border-gray-200 flex-shrink-0">
-        {/* Top Row - Main Actions */}
-        <div className="px-2 sm:px-4 py-2 flex items-center justify-between">
-          {/* Left: Close & Tools */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-gray-100 rounded-md"
-              title="Close"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-
-            <div className="h-6 w-px bg-gray-300 hidden sm:block" />
-
-            {/* Pen Tool */}
-            <button
-              onClick={() => setTool("pen")}
-              className={`p-2 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-1 sm:gap-2 ${
-                tool === "pen" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
-              }`}
-              title="Pen"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-              </svg>
-              <span className="text-sm hidden sm:inline">Pen</span>
-            </button>
-
-            {/* Eraser Tool */}
-            <button
-              onClick={() => setTool("eraser")}
-              className={`p-2 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-1 sm:gap-2 ${
-                tool === "eraser" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
-              }`}
-              title="Eraser"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
-                <path d="M22 21H7" />
-                <path d="m5 11 9 9" />
-              </svg>
-              <span className="text-sm hidden sm:inline">Eraser</span>
-            </button>
-
-            {/* Pointer/Hand Tool */}
-            <button
-              onClick={() => setTool("pointer")}
-              className={`p-2 sm:px-3 sm:py-1.5 rounded-md flex items-center gap-1 sm:gap-2 ${
-                tool === "pointer" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
-              }`}
-              title="Scroll"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
-                <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
-                <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
-                <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
-              </svg>
-              <span className="text-sm hidden sm:inline">Scroll</span>
-            </button>
-
-            <div className="h-6 w-px bg-gray-300 hidden sm:block" />
-
-            {/* Undo */}
-            <button
-              onClick={undoLast}
-              disabled={getTotalAnnotations() === 0}
-              className="p-2 hover:bg-gray-100 rounded-md disabled:opacity-50"
-              title="Undo"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
-              </svg>
-            </button>
-
-            {/* Clear All */}
-            <button
-              onClick={clearAll}
-              disabled={getTotalAnnotations() === 0}
-              className="p-2 hover:bg-gray-100 rounded-md disabled:opacity-50 text-red-600"
-              title="Clear All"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Right: Save Button */}
+        <div className="px-2 sm:px-4 py-1.5 landscape:py-2 flex flex-wrap landscape:flex-nowrap items-center gap-1 sm:gap-2 overflow-x-auto">
+          {/* Close Button */}
           <button
-            onClick={() => setShowMarksDialog(true)}
-            disabled={saving}
-            className="px-3 sm:px-4 py-2 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-2 text-sm"
+            onClick={onClose}
+            className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-md flex-shrink-0"
+            title="Close"
           >
-            {saving ? (
-              <>
-                <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span className="hidden sm:inline">Saving...</span>
-              </>
-            ) : (
-              <>
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span className="hidden sm:inline">Save & Upload</span>
-                <span className="sm:hidden">Save</span>
-              </>
-            )}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
-        </div>
 
-        {/* Bottom Row - Colors, Width, Zoom */}
-        <div className="px-2 sm:px-4 py-2 flex items-center justify-between border-t border-gray-100 gap-2 overflow-x-auto">
-          {/* Colors */}
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {colors.map((c) => (
-              <button
-                key={c.value}
-                onClick={() => {
-                  setColor(c.value);
-                  setTool("pen");
-                }}
-                className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border-2 transition-transform flex-shrink-0 ${
-                  color === c.value && tool === "pen"
-                    ? "border-gray-800 scale-110"
-                    : "border-gray-200 hover:scale-105"
-                }`}
-                style={{ backgroundColor: c.value }}
-                title={c.name}
-              />
-            ))}
-          </div>
+          <div className="h-5 w-px bg-gray-300 flex-shrink-0 hidden landscape:block" />
+
+          {/* Pen Tool */}
+          <button
+            onClick={() => setTool("pen")}
+            className={`p-1.5 sm:p-2 rounded-md flex-shrink-0 ${
+              tool === "pen" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
+            }`}
+            title="Pen"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+          </button>
+
+          {/* Colors - only visible when pen is selected */}
+          {tool === "pen" && (
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {colors.map((c) => (
+                <button
+                  key={c.value}
+                  onClick={() => setColor(c.value)}
+                  className={`w-4 h-4 rounded-full border transition-all flex-shrink-0 ${
+                    color === c.value
+                      ? "border-gray-700 ring-2 ring-gray-300"
+                      : "border-transparent hover:scale-110"
+                  }`}
+                  style={{ backgroundColor: c.value }}
+                  title={c.name}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Eraser Tool */}
+          <button
+            onClick={() => setTool("eraser")}
+            className={`p-1.5 sm:p-2 rounded-md flex-shrink-0 ${
+              tool === "eraser" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
+            }`}
+            title="Eraser"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" />
+              <path d="M22 21H7" />
+              <path d="m5 11 9 9" />
+            </svg>
+          </button>
+
+          {/* Pointer/Hand Tool */}
+          <button
+            onClick={() => setTool("pointer")}
+            className={`p-1.5 sm:p-2 rounded-md flex-shrink-0 ${
+              tool === "pointer" ? "bg-primary-100 text-primary-700" : "hover:bg-gray-100"
+            }`}
+            title="Scroll"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+              <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+              <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+              <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+            </svg>
+          </button>
+
+          <div className="h-5 w-px bg-gray-300 flex-shrink-0 hidden landscape:block" />
+
+          {/* Undo */}
+          <button
+            onClick={undoLast}
+            disabled={getTotalAnnotations() === 0}
+            className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-md disabled:opacity-50 flex-shrink-0"
+            title="Undo"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
+            </svg>
+          </button>
+
+          {/* Clear All */}
+          <button
+            onClick={clearAll}
+            disabled={getTotalAnnotations() === 0}
+            className="p-1.5 sm:p-2 hover:bg-gray-100 rounded-md disabled:opacity-50 text-red-600 flex-shrink-0"
+            title="Clear All"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+
+          {/* Spacer to push remaining items */}
+          <div className="flex-1" />
 
           {/* Stroke Width */}
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-            <span className="text-xs text-gray-500 hidden sm:inline">Width:</span>
+          <div className="flex items-center gap-1 flex-shrink-0">
             <input
               type="range"
               min="1"
               max="10"
               value={strokeWidth}
               onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-              className="w-16 sm:w-20"
+              className="w-14"
             />
-            <span className="text-xs sm:text-sm text-gray-600 w-4">{strokeWidth}</span>
+            <span className="text-xs text-gray-600 w-3">{strokeWidth}</span>
           </div>
 
+          <div className="h-5 w-px bg-gray-200 flex-shrink-0" />
+
           {/* Zoom */}
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex items-center gap-0.5 flex-shrink-0">
             <button
               onClick={() => setScale((s) => Math.max(0.1, s - 0.1))}
-              className="p-1.5 sm:p-1 hover:bg-gray-100 rounded"
+              className="p-1 hover:bg-gray-100 rounded"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
               </svg>
             </button>
-            <span className="text-xs sm:text-sm w-10 sm:w-12 text-center">{Math.round(scale * 100)}%</span>
+            <span className="text-xs w-8 text-center">{Math.round(scale * 100)}%</span>
             <button
               onClick={() => setScale((s) => Math.min(3, s + 0.1))}
-              className="p-1.5 sm:p-1 hover:bg-gray-100 rounded"
+              className="p-1 hover:bg-gray-100 rounded"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
             </button>
           </div>
+
+          {/* Save Button - always on right */}
+          <button
+            onClick={() => setShowMarksDialog(true)}
+            disabled={saving}
+            className="ml-auto landscape:ml-2 px-2 sm:px-3 py-1.5 bg-primary-700 text-white rounded-md hover:bg-primary-800 disabled:opacity-50 flex items-center gap-1.5 text-sm flex-shrink-0"
+          >
+            {saving ? (
+              <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            <span className="hidden sm:inline landscape:hidden">{saving ? "Saving..." : "Save & Upload"}</span>
+            <span className="sm:hidden landscape:inline">{saving ? "" : "Save"}</span>
+          </button>
         </div>
       </div>
 
@@ -590,6 +607,7 @@ export default function PdfAnnotationEditor({
         ref={containerRef}
         className={`flex-1 overflow-auto bg-gray-700 p-4 relative ${tool === "pointer" ? "touch-pan-x touch-pan-y" : ""}`}
       >
+        <div ref={contentRef} className="will-change-transform">
         <PdfViewer
           pdfUrl={pdfUrl}
           scale={scale}
@@ -640,6 +658,7 @@ export default function PdfAnnotationEditor({
             />
           )}
         </PdfViewer>
+        </div>
 
         {/* Brush Preview Cursor */}
         {cursorPos.visible && tool !== "pointer" && (() => {
