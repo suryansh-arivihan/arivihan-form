@@ -48,7 +48,7 @@ export default function PdfAnnotationEditor({
   const [renderScale, setRenderScale] = useState(0.5); // Actual PDF render resolution
   const MAX_SCALE = 2; // Limit max zoom to prevent memory crashes on mobile
   const RENDER_THRESHOLD = 0.5; // Re-render when visual differs from render by this much
-  const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
+  const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pointer");
   const [color, setColor] = useState("#e53935"); // Red default
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [annotations, setAnnotations] = useState<PageAnnotations>({});
@@ -323,7 +323,6 @@ export default function PdfAnnotationEditor({
 
           // Create a snapshot of current view for smooth crossfade
           // This prevents showing grey background during re-render
-          const containerRect = container.getBoundingClientRect();
           const snapshot = document.createElement("div");
           snapshot.style.cssText = `
             position: absolute;
