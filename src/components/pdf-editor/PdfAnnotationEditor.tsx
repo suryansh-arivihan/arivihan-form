@@ -98,6 +98,8 @@ export default function PdfAnnotationEditor({
   } | null>(null);
   // Track if we're waiting for PDF to finish rendering after scale change
   const waitingForRender = useRef<boolean>(false);
+  // Snapshot element for smooth crossfade during re-render
+  const snapshotRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -205,6 +207,11 @@ export default function PdfAnnotationEditor({
         waitingForRender.current = false;
         // Ensure content is visible (in case it was hidden during a previous re-render)
         content.style.opacity = "1";
+        // Remove any existing snapshot
+        if (snapshotRef.current) {
+          snapshotRef.current.remove();
+          snapshotRef.current = null;
+        }
 
         // Calculate pinch center relative to container
         const t1 = e.touches[0];
@@ -314,8 +321,33 @@ export default function PdfAnnotationEditor({
             newScale: finalScale,
           };
 
-          // Mark that we're waiting for render and hide content BEFORE triggering re-render
-          // This prevents the glitchy placeholder pages from being visible
+          // Create a snapshot of current view for smooth crossfade
+          // This prevents showing grey background during re-render
+          const containerRect = container.getBoundingClientRect();
+          const snapshot = document.createElement("div");
+          snapshot.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${content.scrollWidth}px;
+            height: ${content.scrollHeight}px;
+            background: transparent;
+            pointer-events: none;
+            z-index: 10;
+            transform: ${content.style.transform || "scale(1)"};
+            transform-origin: ${content.style.transformOrigin || "center top"};
+          `;
+
+          // Clone the visible content as the snapshot
+          const contentClone = content.cloneNode(true) as HTMLElement;
+          contentClone.style.position = "relative";
+          contentClone.style.transform = "none";
+          contentClone.style.opacity = "1";
+          snapshot.appendChild(contentClone);
+          container.appendChild(snapshot);
+          snapshotRef.current = snapshot;
+
+          // Hide actual content during re-render
           waitingForRender.current = true;
           content.style.transition = "none";
           content.style.opacity = "0";
@@ -830,18 +862,30 @@ export default function PdfAnnotationEditor({
               redrawCanvas(pageNumber);
             }
 
-            // If we were waiting for render to complete, reveal the content
-            // Content was hidden during re-render to avoid showing glitchy placeholders
+            // If we were waiting for render to complete, crossfade from snapshot to new content
             if (waitingForRender.current) {
               waitingForRender.current = false;
               const content = contentRef.current;
+              const snapshot = snapshotRef.current;
+
               if (content) {
                 // Small delay to ensure the canvas is fully painted
                 requestAnimationFrame(() => {
-                  content.style.transition = "opacity 0.15s ease-out";
+                  // Show the new content
+                  content.style.transition = "opacity 0.2s ease-out";
                   content.style.opacity = "1";
                   content.style.transform = "scale(1)";
                   content.style.transformOrigin = "center top";
+
+                  // Fade out and remove the snapshot
+                  if (snapshot) {
+                    snapshot.style.transition = "opacity 0.2s ease-out";
+                    snapshot.style.opacity = "0";
+                    setTimeout(() => {
+                      snapshot.remove();
+                      snapshotRef.current = null;
+                    }, 200);
+                  }
                 });
               }
             }
