@@ -44,9 +44,11 @@ export default function PdfAnnotationEditor({
   subjectName,
 }: PdfAnnotationEditorProps) {
   const [, setNumPages] = useState<number>(0);
-  const [scale, setScale] = useState(0.5);
+  const [visualScale, setVisualScale] = useState(0.5); // What user sees (CSS transform)
+  const [renderScale, setRenderScale] = useState(0.5); // Actual PDF render resolution
   const MAX_SCALE = 2; // Limit max zoom to prevent memory crashes on mobile
-  const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
+  const RENDER_THRESHOLD = 0.5; // Re-render when visual differs from render by this much
+  const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pointer");
   const [color, setColor] = useState("#e53935"); // Red default
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [annotations, setAnnotations] = useState<PageAnnotations>({});
@@ -69,20 +71,35 @@ export default function PdfAnnotationEditor({
   const contentRef = useRef<HTMLDivElement>(null);
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const visualScaleRef = useRef<number>(0.5);
-  const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const isRenderingRef = useRef<boolean>(false);
   const lastRenderTime = useRef<number>(0);
   const pinchState = useRef<{
     active: boolean;
     initialDistance: number;
     initialScale: number;
     currentTransform: number;
+    lastCenterX: number;  // Last pinch center X (relative to container)
+    lastCenterY: number;  // Last pinch center Y (relative to container)
   }>({
     active: false,
     initialDistance: 0,
     initialScale: 0.5,
     currentTransform: 1,
+    lastCenterX: 0,
+    lastCenterY: 0,
   });
+  // Store focal point data for scroll adjustment after re-render
+  const pendingScrollAdjustment = useRef<{
+    screenX: number;  // Screen position of pinch center (relative to container)
+    screenY: number;
+    scrollLeft: number;  // Scroll position at time of pinch
+    scrollTop: number;
+    oldScale: number;  // Scale before zoom
+    newScale: number;  // Scale after zoom
+  } | null>(null);
+  // Track if we're waiting for PDF to finish rendering after scale change
+  const waitingForRender = useRef<boolean>(false);
+  // Snapshot element for smooth crossfade during re-render
+  const snapshotRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -92,10 +109,76 @@ export default function PdfAnnotationEditor({
       .catch((err) => console.error("Error fetching PDF:", err));
   }, [pdfUrl]);
 
-  // Keep visual scale in sync when scale changes (e.g., via buttons)
+  // Keep visual scale ref in sync
   useEffect(() => {
-    visualScaleRef.current = scale;
-  }, [scale]);
+    visualScaleRef.current = visualScale;
+  }, [visualScale]);
+
+  // Check if we need to re-render PDF for quality (only for non-pinch zoom changes)
+  useEffect(() => {
+    // Skip if there's a pending scroll adjustment (pinch zoom handles its own render)
+    if (pendingScrollAdjustment.current) return;
+
+    const ratio = visualScale / renderScale;
+    // Re-render if zoomed in too much (blurry) or zoomed out too much (wasting memory)
+    if (ratio > 1 + RENDER_THRESHOLD || ratio < 1 - RENDER_THRESHOLD) {
+      // Debounce the render scale update
+      const timeout = setTimeout(() => {
+        setRenderScale(visualScale);
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [visualScale, renderScale]);
+
+  // Handle scroll adjustment after PDF re-renders (for pinch zoom focal point preservation)
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    const adjustment = pendingScrollAdjustment.current;
+
+    // Only proceed if we have a pending adjustment and scales now match
+    if (!adjustment || !container || !content) return;
+    if (Math.abs(renderScale - adjustment.newScale) > 0.01) return;
+
+    // Calculate new scroll position to keep focal point at same screen position
+    // Before: content point at (screenX + scrollLeft, screenY + scrollTop) in oldScale coordinates
+    // After: same content point is at (screenX + scrollLeft, screenY + scrollTop) * (newScale/oldScale) in newScale coordinates
+    // We want this point to still be at (screenX, screenY) on screen
+    const scaleRatio = adjustment.newScale / adjustment.oldScale;
+    const contentX = adjustment.screenX + adjustment.scrollLeft;
+    const contentY = adjustment.screenY + adjustment.scrollTop;
+
+    const newScrollLeft = contentX * scaleRatio - adjustment.screenX;
+    const newScrollTop = contentY * scaleRatio - adjustment.screenY;
+
+    // Apply scroll adjustment immediately
+    container.scrollLeft = Math.max(0, newScrollLeft);
+    container.scrollTop = Math.max(0, newScrollTop);
+
+    // Reset transform (content is already hidden via opacity in the timeout callback)
+    content.style.transform = "scale(1)";
+    content.style.transformOrigin = "center top";
+
+    // Clear the pending adjustment (scroll is done, just waiting for render to reveal)
+    pendingScrollAdjustment.current = null;
+  }, [renderScale]);
+
+  // Apply CSS transform to compensate for render vs visual scale difference
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+
+    // Don't interfere if scroll adjustment or render completion will handle this
+    if (pendingScrollAdjustment.current || waitingForRender.current) return;
+
+    const cssScale = visualScale / renderScale;
+    if (Math.abs(cssScale - 1) > 0.01) {
+      content.style.transform = `scale(${cssScale})`;
+      content.style.transformOrigin = "center top";
+    } else {
+      content.style.transform = "scale(1)";
+    }
+  }, [visualScale, renderScale]);
 
   // Pinch zoom with CSS transform for smooth visual feedback
   useEffect(() => {
@@ -119,6 +202,16 @@ export default function PdfAnnotationEditor({
           clearTimeout(renderTimeoutRef.current);
           renderTimeoutRef.current = null;
         }
+        // Clear any pending scroll adjustment and render wait
+        pendingScrollAdjustment.current = null;
+        waitingForRender.current = false;
+        // Ensure content is visible (in case it was hidden during a previous re-render)
+        content.style.opacity = "1";
+        // Remove any existing snapshot
+        if (snapshotRef.current) {
+          snapshotRef.current.remove();
+          snapshotRef.current = null;
+        }
 
         // Calculate pinch center relative to container
         const t1 = e.touches[0];
@@ -127,20 +220,16 @@ export default function PdfAnnotationEditor({
         const centerY = (t1.clientY + t2.clientY) / 2;
         const containerRect = container.getBoundingClientRect();
 
-        // Store center relative to content (accounting for scroll)
-        pinchCenterRef.current = {
-          x: centerX - containerRect.left + container.scrollLeft,
-          y: centerY - containerRect.top + container.scrollTop,
-        };
-
-        // Use visual scale if we haven't rendered yet, otherwise use actual scale
-        const startScale = visualScaleRef.current !== scale ? visualScaleRef.current : scale;
+        // Use visual scale ref as the starting point
+        const startScale = visualScaleRef.current;
 
         pinchState.current = {
           active: true,
           initialDistance: getDistance(e.touches),
           initialScale: startScale,
           currentTransform: 1,
+          lastCenterX: centerX - containerRect.left,
+          lastCenterY: centerY - containerRect.top,
         };
         content.style.transition = "none";
       }
@@ -152,16 +241,16 @@ export default function PdfAnnotationEditor({
         const currentDistance = getDistance(e.touches);
         const ratio = currentDistance / pinchState.current.initialDistance;
 
-        // Update pinch center continuously
+        // Update pinch center continuously (store screen position relative to container)
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const centerX = (t1.clientX + t2.clientX) / 2;
         const centerY = (t1.clientY + t2.clientY) / 2;
         const containerRect = container.getBoundingClientRect();
-        pinchCenterRef.current = {
-          x: centerX - containerRect.left + container.scrollLeft,
-          y: centerY - containerRect.top + container.scrollTop,
-        };
+
+        // Store last pinch center for use at touch end
+        pinchState.current.lastCenterX = centerX - containerRect.left;
+        pinchState.current.lastCenterY = centerY - containerRect.top;
 
         // Clamp the visual transform ratio
         const minRatio = 0.1 / pinchState.current.initialScale;
@@ -171,11 +260,12 @@ export default function PdfAnnotationEditor({
         pinchState.current.currentTransform = clampedRatio;
 
         // Calculate CSS transform relative to the currently rendered scale
-        const visualScale = Math.min(MAX_SCALE, pinchState.current.initialScale * clampedRatio);
-        const cssTransform = visualScale / scale;
+        const newVisualScale = Math.min(MAX_SCALE, pinchState.current.initialScale * clampedRatio);
+        const cssTransform = newVisualScale / renderScale;
 
         // Use pinch center as transform origin for more natural feel
-        const originX = centerX - containerRect.left;
+        // Origin must be in content coordinates (include scroll) to keep pinch point stationary
+        const originX = centerX - containerRect.left + container.scrollLeft;
         const originY = centerY - containerRect.top + container.scrollTop;
 
         // Apply CSS transform for instant visual feedback (GPU accelerated)
@@ -189,27 +279,26 @@ export default function PdfAnnotationEditor({
         const finalScale = Math.min(MAX_SCALE, Math.max(0.1,
           pinchState.current.initialScale * pinchState.current.currentTransform
         ));
+        const oldScale = renderScale;
 
-        // Store the visual scale and keep CSS transform active
+        // Store the visual scale
         visualScaleRef.current = finalScale;
-        const transformRatio = finalScale / scale;
-        const scaleChange = finalScale / scale;
-
-        // Calculate scroll adjustment to maintain focal point
-        const focalX = pinchCenterRef.current.x;
-        const focalY = pinchCenterRef.current.y;
-        const newScrollLeft = focalX * scaleChange - (focalX - container.scrollLeft);
-        const newScrollTop = focalY * scaleChange - (focalY - container.scrollTop);
+        const transformRatio = finalScale / renderScale;
 
         // Keep showing the CSS transform (don't reset yet)
         content.style.transition = "none";
         content.style.transform = `scale(${transformRatio})`;
-        // Keep the transform origin from the last pinch position
 
         // Clear any pending render
         if (renderTimeoutRef.current) {
           clearTimeout(renderTimeoutRef.current);
         }
+
+        // Capture scroll position and pinch center NOW (at touch end)
+        const capturedScrollLeft = container.scrollLeft;
+        const capturedScrollTop = container.scrollTop;
+        const capturedCenterX = pinchState.current.lastCenterX;
+        const capturedCenterY = pinchState.current.lastCenterY;
 
         // Debounce: only re-render PDF after 350ms of no pinching
         renderTimeoutRef.current = setTimeout(() => {
@@ -221,19 +310,51 @@ export default function PdfAnnotationEditor({
           }
           lastRenderTime.current = now;
 
-          // Render at full quality
-          setScale(finalScale);
+          // Store focal point info for scroll adjustment after re-render
+          // Use the values captured at touch end, not current values
+          pendingScrollAdjustment.current = {
+            screenX: capturedCenterX,
+            screenY: capturedCenterY,
+            scrollLeft: capturedScrollLeft,
+            scrollTop: capturedScrollTop,
+            oldScale: oldScale,
+            newScale: finalScale,
+          };
 
-          // Adjust scroll position to maintain focal point
-          requestAnimationFrame(() => {
-            container.scrollLeft = Math.max(0, newScrollLeft);
-            container.scrollTop = Math.max(0, newScrollTop);
+          // Create a snapshot of current view for smooth crossfade
+          // This prevents showing grey background during re-render
+          const snapshot = document.createElement("div");
+          snapshot.style.cssText = `
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: ${content.scrollWidth}px;
+            height: ${content.scrollHeight}px;
+            background: transparent;
+            pointer-events: none;
+            z-index: 10;
+            transform: ${content.style.transform || "scale(1)"};
+            transform-origin: ${content.style.transformOrigin || "center top"};
+          `;
 
-            requestAnimationFrame(() => {
-              content.style.transition = "transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1)";
-              content.style.transform = "scale(1)";
-            });
-          });
+          // Clone the visible content as the snapshot
+          const contentClone = content.cloneNode(true) as HTMLElement;
+          contentClone.style.position = "relative";
+          contentClone.style.transform = "none";
+          contentClone.style.opacity = "1";
+          snapshot.appendChild(contentClone);
+          container.appendChild(snapshot);
+          snapshotRef.current = snapshot;
+
+          // Hide actual content during re-render
+          waitingForRender.current = true;
+          content.style.transition = "none";
+          content.style.opacity = "0";
+
+          // Set both scales together to trigger immediate re-render
+          // The scroll adjustment will happen in the useEffect after renderScale updates
+          setVisualScale(finalScale);
+          setRenderScale(finalScale);
         }, 350);
 
         pinchState.current.active = false;
@@ -252,7 +373,7 @@ export default function PdfAnnotationEditor({
       container.removeEventListener("touchend", handleTouchEnd);
       container.removeEventListener("touchcancel", handleTouchEnd);
     };
-  }, [tool, scale]);
+  }, [tool, renderScale]);
 
   const getCanvasCoordinates = (
     clientX: number,
@@ -661,16 +782,16 @@ export default function PdfAnnotationEditor({
             {/* Zoom */}
             <div className="flex items-center gap-0.5 flex-shrink-0">
               <button
-                onClick={() => setScale((s) => Math.max(0.1, s - 0.1))}
+                onClick={() => setVisualScale((s) => Math.max(0.1, s - 0.1))}
                 className="p-1 hover:bg-gray-100 rounded"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                 </svg>
               </button>
-              <span className="text-xs w-8 text-center">{Math.round(scale * 100)}%</span>
+              <span className="text-xs w-8 text-center">{Math.round(visualScale * 100)}%</span>
               <button
-                onClick={() => setScale((s) => Math.min(MAX_SCALE, s + 0.1))}
+                onClick={() => setVisualScale((s) => Math.min(MAX_SCALE, s + 0.1))}
                 className="p-1 hover:bg-gray-100 rounded"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -724,7 +845,7 @@ export default function PdfAnnotationEditor({
         <div ref={contentRef} className="will-change-transform">
         <PdfViewer
           pdfUrl={pdfUrl}
-          scale={scale}
+          scale={renderScale}
           canvasRefs={canvasRefs}
           onLoadSuccess={(pages) => setNumPages(pages)}
           onLoadError={() => {}}
@@ -738,6 +859,34 @@ export default function PdfAnnotationEditor({
                 [pageNumber]: { width: pageCanvas.width, height: pageCanvas.height },
               }));
               redrawCanvas(pageNumber);
+            }
+
+            // If we were waiting for render to complete, crossfade from snapshot to new content
+            if (waitingForRender.current) {
+              waitingForRender.current = false;
+              const content = contentRef.current;
+              const snapshot = snapshotRef.current;
+
+              if (content) {
+                // Small delay to ensure the canvas is fully painted
+                requestAnimationFrame(() => {
+                  // Show the new content
+                  content.style.transition = "opacity 0.2s ease-out";
+                  content.style.opacity = "1";
+                  content.style.transform = "scale(1)";
+                  content.style.transformOrigin = "center top";
+
+                  // Fade out and remove the snapshot
+                  if (snapshot) {
+                    snapshot.style.transition = "opacity 0.2s ease-out";
+                    snapshot.style.opacity = "0";
+                    setTimeout(() => {
+                      snapshot.remove();
+                      snapshotRef.current = null;
+                    }, 200);
+                  }
+                });
+              }
             }
           }}
         >
@@ -776,9 +925,9 @@ export default function PdfAnnotationEditor({
 
         {/* Brush Preview Cursor */}
         {cursorPos.visible && tool !== "pointer" && (() => {
-          // Calculate preview size based on stroke width and scale
+          // Calculate preview size based on stroke width and visual scale
           const baseSize = tool === "eraser" ? strokeWidth * 3 : strokeWidth;
-          const previewSize = Math.max(8, baseSize * scale * 1.5);
+          const previewSize = Math.max(8, baseSize * visualScale * 1.5);
           return (
             <div
               className="pointer-events-none fixed z-50 rounded-full"
