@@ -45,6 +45,7 @@ export default function PdfAnnotationEditor({
 }: PdfAnnotationEditorProps) {
   const [, setNumPages] = useState<number>(0);
   const [scale, setScale] = useState(0.5);
+  const MAX_SCALE = 2; // Limit max zoom to prevent memory crashes on mobile
   const [tool, setTool] = useState<"pen" | "eraser" | "pointer">("pen");
   const [color, setColor] = useState("#e53935"); // Red default
   const [strokeWidth, setStrokeWidth] = useState(2);
@@ -69,6 +70,8 @@ export default function PdfAnnotationEditor({
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const visualScaleRef = useRef<number>(0.5);
   const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isRenderingRef = useRef<boolean>(false);
+  const lastRenderTime = useRef<number>(0);
   const pinchState = useRef<{
     active: boolean;
     initialDistance: number;
@@ -162,13 +165,13 @@ export default function PdfAnnotationEditor({
 
         // Clamp the visual transform ratio
         const minRatio = 0.1 / pinchState.current.initialScale;
-        const maxRatio = 3 / pinchState.current.initialScale;
+        const maxRatio = MAX_SCALE / pinchState.current.initialScale;
         const clampedRatio = Math.min(maxRatio, Math.max(minRatio, ratio));
 
         pinchState.current.currentTransform = clampedRatio;
 
         // Calculate CSS transform relative to the currently rendered scale
-        const visualScale = pinchState.current.initialScale * clampedRatio;
+        const visualScale = Math.min(MAX_SCALE, pinchState.current.initialScale * clampedRatio);
         const cssTransform = visualScale / scale;
 
         // Use pinch center as transform origin for more natural feel
@@ -183,7 +186,7 @@ export default function PdfAnnotationEditor({
 
     const handleTouchEnd = () => {
       if (pinchState.current.active) {
-        const finalScale = Math.min(3, Math.max(0.1,
+        const finalScale = Math.min(MAX_SCALE, Math.max(0.1,
           pinchState.current.initialScale * pinchState.current.currentTransform
         ));
 
@@ -208,8 +211,16 @@ export default function PdfAnnotationEditor({
           clearTimeout(renderTimeoutRef.current);
         }
 
-        // Debounce: only re-render PDF after 200ms of no pinching
+        // Debounce: only re-render PDF after 350ms of no pinching
         renderTimeoutRef.current = setTimeout(() => {
+          // Prevent rapid re-renders (minimum 400ms between renders)
+          const now = Date.now();
+          if (now - lastRenderTime.current < 400) {
+            // Skip this render, CSS transform is still showing the zoom
+            return;
+          }
+          lastRenderTime.current = now;
+
           // Render at full quality
           setScale(finalScale);
 
@@ -223,7 +234,7 @@ export default function PdfAnnotationEditor({
               content.style.transform = "scale(1)";
             });
           });
-        }, 250);
+        }, 350);
 
         pinchState.current.active = false;
         pinchState.current.currentTransform = 1;
@@ -659,7 +670,7 @@ export default function PdfAnnotationEditor({
               </button>
               <span className="text-xs w-8 text-center">{Math.round(scale * 100)}%</span>
               <button
-                onClick={() => setScale((s) => Math.min(3, s + 0.1))}
+                onClick={() => setScale((s) => Math.min(MAX_SCALE, s + 0.1))}
                 className="p-1 hover:bg-gray-100 rounded"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
