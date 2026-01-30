@@ -153,16 +153,11 @@ export default function PdfAnnotationEditor({
     container.scrollLeft = Math.max(0, newScrollLeft);
     container.scrollTop = Math.max(0, newScrollTop);
 
-    // Hide content during re-render to avoid showing glitchy placeholder pages
-    // The content will be revealed in onPageRender once the PDF is actually painted
-    content.style.opacity = "0";
+    // Reset transform (content is already hidden via opacity in the timeout callback)
     content.style.transform = "scale(1)";
-    content.style.transition = "none";
+    content.style.transformOrigin = "center top";
 
-    // Mark that we're waiting for render to complete
-    waitingForRender.current = true;
-
-    // Clear the pending adjustment (scroll is done, just waiting for render)
+    // Clear the pending adjustment (scroll is done, just waiting for render to reveal)
     pendingScrollAdjustment.current = null;
   }, [renderScale]);
 
@@ -318,6 +313,12 @@ export default function PdfAnnotationEditor({
             oldScale: oldScale,
             newScale: finalScale,
           };
+
+          // Mark that we're waiting for render and hide content BEFORE triggering re-render
+          // This prevents the glitchy placeholder pages from being visible
+          waitingForRender.current = true;
+          content.style.transition = "none";
+          content.style.opacity = "0";
 
           // Set both scales together to trigger immediate re-render
           // The scroll adjustment will happen in the useEffect after renderScale updates
