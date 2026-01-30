@@ -96,6 +96,8 @@ export default function PdfAnnotationEditor({
     oldScale: number;  // Scale before zoom
     newScale: number;  // Scale after zoom
   } | null>(null);
+  // Track if we're waiting for PDF to finish rendering after scale change
+  const waitingForRender = useRef<boolean>(false);
 
   // Fetch PDF bytes for later saving
   useEffect(() => {
@@ -147,19 +149,21 @@ export default function PdfAnnotationEditor({
     const newScrollLeft = contentX * scaleRatio - adjustment.screenX;
     const newScrollTop = contentY * scaleRatio - adjustment.screenY;
 
-    // Apply scroll adjustment
-    requestAnimationFrame(() => {
-      container.scrollLeft = Math.max(0, newScrollLeft);
-      container.scrollTop = Math.max(0, newScrollTop);
+    // Apply scroll adjustment immediately
+    container.scrollLeft = Math.max(0, newScrollLeft);
+    container.scrollTop = Math.max(0, newScrollTop);
 
-      // Reset CSS transform smoothly
-      content.style.transition = "transform 0.15s ease-out";
-      content.style.transform = "scale(1)";
-      content.style.transformOrigin = "center top";
+    // Hide content during re-render to avoid showing glitchy placeholder pages
+    // The content will be revealed in onPageRender once the PDF is actually painted
+    content.style.opacity = "0";
+    content.style.transform = "scale(1)";
+    content.style.transition = "none";
 
-      // Clear the pending adjustment
-      pendingScrollAdjustment.current = null;
-    });
+    // Mark that we're waiting for render to complete
+    waitingForRender.current = true;
+
+    // Clear the pending adjustment (scroll is done, just waiting for render)
+    pendingScrollAdjustment.current = null;
   }, [renderScale]);
 
   // Apply CSS transform to compensate for render vs visual scale difference
@@ -167,8 +171,8 @@ export default function PdfAnnotationEditor({
     const content = contentRef.current;
     if (!content) return;
 
-    // Don't interfere if scroll adjustment effect will handle this
-    if (pendingScrollAdjustment.current) return;
+    // Don't interfere if scroll adjustment or render completion will handle this
+    if (pendingScrollAdjustment.current || waitingForRender.current) return;
 
     const cssScale = visualScale / renderScale;
     if (Math.abs(cssScale - 1) > 0.01) {
@@ -201,8 +205,11 @@ export default function PdfAnnotationEditor({
           clearTimeout(renderTimeoutRef.current);
           renderTimeoutRef.current = null;
         }
-        // Clear any pending scroll adjustment
+        // Clear any pending scroll adjustment and render wait
         pendingScrollAdjustment.current = null;
+        waitingForRender.current = false;
+        // Ensure content is visible (in case it was hidden during a previous re-render)
+        content.style.opacity = "1";
 
         // Calculate pinch center relative to container
         const t1 = e.touches[0];
@@ -820,6 +827,22 @@ export default function PdfAnnotationEditor({
                 [pageNumber]: { width: pageCanvas.width, height: pageCanvas.height },
               }));
               redrawCanvas(pageNumber);
+            }
+
+            // If we were waiting for render to complete, reveal the content
+            // Content was hidden during re-render to avoid showing glitchy placeholders
+            if (waitingForRender.current) {
+              waitingForRender.current = false;
+              const content = contentRef.current;
+              if (content) {
+                // Small delay to ensure the canvas is fully painted
+                requestAnimationFrame(() => {
+                  content.style.transition = "opacity 0.15s ease-out";
+                  content.style.opacity = "1";
+                  content.style.transform = "scale(1)";
+                  content.style.transformOrigin = "center top";
+                });
+              }
             }
           }}
         >
