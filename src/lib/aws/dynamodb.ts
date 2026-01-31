@@ -347,3 +347,57 @@ export async function updateSubjectEvaluation(
   const response = await docClient.send(command);
   return response.Attributes as StudentRecord;
 }
+
+/**
+ * Update only the marks for a specific subject (without changing the checked file)
+ */
+export async function updateSubjectMarks(
+  studentId: string,
+  submissionType: "arivihan_model_paper" | "own_question_paper",
+  subjectCode: string,
+  marksObtained: number,
+  marksTotal: number
+): Promise<StudentRecord | null> {
+  // First get the current record
+  const student = await getStudentById(studentId);
+  if (!student) return null;
+
+  const subjectField = submissionType === "arivihan_model_paper" ? "arivihanSubjects" : "ownSubjects";
+  const subjects = student[subjectField];
+
+  // Find and update the subject
+  const subjectIndex = subjects.findIndex((s) => s.subjectCode === subjectCode);
+  if (subjectIndex === -1) return null;
+
+  // Check if this subject has been checked
+  if (!subjects[subjectIndex].checkedAt) {
+    return null; // Can't update marks for unchecked paper
+  }
+
+  const now = new Date().toISOString();
+
+  // Update only the marks
+  subjects[subjectIndex] = {
+    ...subjects[subjectIndex],
+    marksObtained,
+    marksTotal,
+  };
+
+  // Update the record
+  const command = new UpdateCommand({
+    TableName: TABLE_NAME,
+    Key: { studentId },
+    UpdateExpression: "SET #subjects = :subjects, updatedAt = :now",
+    ExpressionAttributeNames: {
+      "#subjects": subjectField,
+    },
+    ExpressionAttributeValues: {
+      ":subjects": subjects,
+      ":now": now,
+    },
+    ReturnValues: "ALL_NEW",
+  });
+
+  const response = await docClient.send(command);
+  return response.Attributes as StudentRecord;
+}

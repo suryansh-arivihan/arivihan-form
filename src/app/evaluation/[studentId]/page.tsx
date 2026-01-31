@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { SUBJECTS } from "@/constants/subjects";
 import { StudentRecord, SubjectSubmission, SubmissionType } from "@/types/form";
@@ -78,7 +78,14 @@ const IdCardIcon = () => (
 export default function SubmissionDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const studentId = params.studentId as string;
+
+  // Teacher view params - if present, only show assigned subject
+  const assignedSubject = searchParams.get("subject");
+  const assignedType = searchParams.get("type") as "arivihan" | "own" | null;
+  const assignmentId = searchParams.get("assignmentId");
+  const isTeacherView = !!(assignedSubject && assignedType && assignmentId);
 
   const [submission, setSubmission] = useState<StudentRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,6 +122,27 @@ export default function SubmissionDetailPage() {
     marksObtained: "",
     marksTotal: "",
     uploading: false,
+  });
+  const [reTotalDialog, setReTotalDialog] = useState<{
+    isOpen: boolean;
+    subjectCode: string;
+    subjectName: string;
+    submissionType: SubmissionType;
+    marksObtained: string;
+    marksTotal: string;
+    currentMarksObtained: number | undefined;
+    currentMarksTotal: number | undefined;
+    updating: boolean;
+  }>({
+    isOpen: false,
+    subjectCode: "",
+    subjectName: "",
+    submissionType: "arivihan_model_paper",
+    marksObtained: "",
+    marksTotal: "",
+    currentMarksObtained: undefined,
+    currentMarksTotal: undefined,
+    updating: false,
   });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -232,6 +260,65 @@ export default function SubmissionDetailPage() {
     const file = e.target.files?.[0];
     if (file && file.type === "application/pdf") {
       setUploadDialog((prev) => ({ ...prev, file }));
+    }
+  };
+
+  const openReTotalDialog = (
+    subjectCode: string,
+    submissionType: SubmissionType,
+    currentMarksObtained?: number,
+    currentMarksTotal?: number
+  ) => {
+    setReTotalDialog({
+      isOpen: true,
+      subjectCode,
+      subjectName: getSubjectName(subjectCode),
+      submissionType,
+      marksObtained: currentMarksObtained?.toString() || "",
+      marksTotal: currentMarksTotal?.toString() || "",
+      currentMarksObtained,
+      currentMarksTotal,
+      updating: false,
+    });
+  };
+
+  const handleUpdateMarks = async () => {
+    if (!submission || !reTotalDialog.marksObtained || !reTotalDialog.marksTotal) return;
+
+    try {
+      setReTotalDialog((prev) => ({ ...prev, updating: true }));
+
+      const response = await fetch("/api/evaluation/update-marks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: submission.studentId,
+          subjectCode: reTotalDialog.subjectCode,
+          submissionType: reTotalDialog.submissionType,
+          marksObtained: reTotalDialog.marksObtained,
+          marksTotal: reTotalDialog.marksTotal,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to update marks");
+      }
+
+      // Refresh submission data
+      const refreshResponse = await fetch(
+        `/api/evaluation/submissions/${encodeURIComponent(submission.studentId)}`
+      );
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        setSubmission(data.submission);
+      }
+
+      setReTotalDialog((prev) => ({ ...prev, isOpen: false }));
+    } catch (error) {
+      alert(`Failed to update marks: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setReTotalDialog((prev) => ({ ...prev, updating: false }));
     }
   };
 
@@ -502,28 +589,54 @@ export default function SubmissionDetailPage() {
             )}
           </div>
 
-          {sub.fileUrls.length > 0 && (
-            <button
-              onClick={() => showCheckOptions(sub.fileUrls[0], sub.subjectCode, submissionType)}
-              className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
-                isChecked
-                  ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300"
-                  : "bg-green-600 text-white hover:bg-green-700 shadow-sm"
-              }`}
-            >
-              <PencilIcon />
-              {isChecked ? "Re-check" : "Check Paper"}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isChecked && (
+              <button
+                onClick={() => openReTotalDialog(sub.subjectCode, submissionType, sub.marksObtained, sub.marksTotal)}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-all"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                </svg>
+                Re-total
+              </button>
+            )}
+            {sub.fileUrls.length > 0 && (
+              <button
+                onClick={() => showCheckOptions(sub.fileUrls[0], sub.subjectCode, submissionType)}
+                className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-all ${
+                  isChecked
+                    ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:border-slate-300"
+                    : "bg-green-600 text-white hover:bg-green-700 shadow-sm"
+                }`}
+              >
+                <PencilIcon />
+                {isChecked ? "Re-check" : "Check Paper"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
   };
 
-  const totalArivihan = submission.arivihanSubjects.length;
-  const checkedArivihan = submission.arivihanSubjects.filter(s => s.checkedAt).length;
-  const totalOwn = submission.ownSubjects.length;
-  const checkedOwn = submission.ownSubjects.filter(s => s.checkedAt).length;
+  // Filter subjects based on teacher view
+  const filteredArivihanSubjects = isTeacherView && assignedType === "arivihan"
+    ? submission.arivihanSubjects.filter(s => s.subjectCode === assignedSubject)
+    : isTeacherView
+    ? [] // Teacher assigned to "own" type, don't show arivihan
+    : submission.arivihanSubjects;
+
+  const filteredOwnSubjects = isTeacherView && assignedType === "own"
+    ? submission.ownSubjects.filter(s => s.subjectCode === assignedSubject)
+    : isTeacherView
+    ? [] // Teacher assigned to "arivihan" type, don't show own
+    : submission.ownSubjects;
+
+  const totalArivihan = filteredArivihanSubjects.length;
+  const checkedArivihan = filteredArivihanSubjects.filter(s => s.checkedAt).length;
+  const totalOwn = filteredOwnSubjects.length;
+  const checkedOwn = filteredOwnSubjects.filter(s => s.checkedAt).length;
 
   return (
     <>
@@ -691,6 +804,79 @@ export default function SubmissionDetailPage() {
         </div>
       )}
 
+      {/* Re-total Dialog (Update Marks Only) */}
+      {reTotalDialog.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">
+              Update Marks
+            </h3>
+            <p className="text-sm text-slate-500 mb-2">{reTotalDialog.subjectName}</p>
+            {reTotalDialog.currentMarksObtained !== undefined && (
+              <p className="text-sm text-slate-400 mb-6">
+                Current: {reTotalDialog.currentMarksObtained}
+                {reTotalDialog.currentMarksTotal !== undefined && `/${reTotalDialog.currentMarksTotal}`}
+              </p>
+            )}
+
+            {/* Marks Input */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-slate-700 mb-2">New Marks</label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min="0"
+                    value={reTotalDialog.marksObtained}
+                    onChange={(e) => setReTotalDialog((prev) => ({ ...prev, marksObtained: e.target.value }))}
+                    placeholder="Obtained"
+                    className="w-full px-3 py-2 text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <span className="text-xl text-slate-400">/</span>
+                <div className="flex-1">
+                  <input
+                    type="number"
+                    min="1"
+                    value={reTotalDialog.marksTotal}
+                    onChange={(e) => setReTotalDialog((prev) => ({ ...prev, marksTotal: e.target.value }))}
+                    placeholder="Total"
+                    className="w-full px-3 py-2 text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setReTotalDialog((prev) => ({ ...prev, isOpen: false }))}
+                className="flex-1 px-4 py-2.5 text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateMarks}
+                disabled={!reTotalDialog.marksObtained || !reTotalDialog.marksTotal || reTotalDialog.updating}
+                className="flex-1 px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {reTotalDialog.updating ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Updating...
+                  </>
+                ) : (
+                  "Update Marks"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50/30 to-slate-50">
         {/* Header */}
         <header className="sticky top-0 z-20 backdrop-blur-xl bg-white/80 border-b border-slate-200/60">
@@ -700,7 +886,7 @@ export default function SubmissionDetailPage() {
               className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors mb-3"
             >
               <ArrowLeftIcon />
-              Back to Dashboard
+              {isTeacherView ? "Back to My Assignments" : "Back to Dashboard"}
             </button>
             <div className="flex items-start justify-between">
               <div>
@@ -709,15 +895,22 @@ export default function SubmissionDetailPage() {
                 </h1>
                 <p className="text-sm text-slate-500 font-mono mt-0.5">{submission.studentId}</p>
               </div>
-              <span
-                className={`px-3 py-1.5 text-sm font-medium rounded-lg ${
-                  submission.mediumOfStudy === "hindi"
-                    ? "bg-amber-100 text-amber-700"
-                    : "bg-sky-100 text-sky-700"
-                }`}
-              >
-                {submission.mediumOfStudy === "hindi" ? "Hindi Medium" : "English Medium"}
-              </span>
+              <div className="flex flex-col items-end gap-2">
+                <span
+                  className={`px-3 py-1.5 text-sm font-medium rounded-lg ${
+                    submission.mediumOfStudy === "hindi"
+                      ? "bg-amber-100 text-amber-700"
+                      : "bg-sky-100 text-sky-700"
+                  }`}
+                >
+                  {submission.mediumOfStudy === "hindi" ? "Hindi Medium" : "English Medium"}
+                </span>
+                {isTeacherView && assignedSubject && (
+                  <span className="px-3 py-1.5 text-sm font-medium rounded-lg bg-purple-100 text-purple-700">
+                    {getSubjectName(assignedSubject).split(" (")[0]}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </header>
@@ -784,18 +977,20 @@ export default function SubmissionDetailPage() {
           </div>
 
           {/* Arivihan Model Paper Subjects */}
-          {submission.arivihanSubjects.length > 0 && (
+          {filteredArivihanSubjects.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-900">
-                    Arivihan Model Papers
+                    {isTeacherView ? "Assigned Paper" : "Arivihan Model Papers"}
                   </h2>
                   <p className="text-sm text-slate-500">
-                    {totalArivihan} subject{totalArivihan !== 1 ? "s" : ""} submitted
+                    {isTeacherView
+                      ? "Arivihan Model Paper"
+                      : `${totalArivihan} subject${totalArivihan !== 1 ? "s" : ""} submitted`}
                   </p>
                 </div>
-                {checkedArivihan > 0 && (
+                {!isTeacherView && checkedArivihan > 0 && (
                   <div className="text-right">
                     <p className="text-2xl font-semibold text-green-600">{checkedArivihan}/{totalArivihan}</p>
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Checked</p>
@@ -803,7 +998,7 @@ export default function SubmissionDetailPage() {
                 )}
               </div>
               <div className="space-y-4">
-                {submission.arivihanSubjects.map((sub) =>
+                {filteredArivihanSubjects.map((sub) =>
                   renderSubjectCard(sub, "arivihan_model_paper", "purple")
                 )}
               </div>
@@ -811,18 +1006,20 @@ export default function SubmissionDetailPage() {
           )}
 
           {/* Own Question Paper Subjects */}
-          {submission.ownSubjects.length > 0 && (
+          {filteredOwnSubjects.length > 0 && (
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-6">
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <h2 className="text-lg font-semibold text-slate-900">
-                    Own Question Papers
+                    {isTeacherView ? "Assigned Paper" : "Own Question Papers"}
                   </h2>
                   <p className="text-sm text-slate-500">
-                    {totalOwn} subject{totalOwn !== 1 ? "s" : ""} submitted
+                    {isTeacherView
+                      ? "Own Question Paper"
+                      : `${totalOwn} subject${totalOwn !== 1 ? "s" : ""} submitted`}
                   </p>
                 </div>
-                {checkedOwn > 0 && (
+                {!isTeacherView && checkedOwn > 0 && (
                   <div className="text-right">
                     <p className="text-2xl font-semibold text-green-600">{checkedOwn}/{totalOwn}</p>
                     <p className="text-xs text-slate-500 uppercase tracking-wide">Checked</p>
@@ -830,7 +1027,7 @@ export default function SubmissionDetailPage() {
                 )}
               </div>
               <div className="space-y-4">
-                {submission.ownSubjects.map((sub) =>
+                {filteredOwnSubjects.map((sub) =>
                   renderSubjectCard(sub, "own_question_paper", "emerald")
                 )}
               </div>
@@ -838,8 +1035,8 @@ export default function SubmissionDetailPage() {
           )}
 
           {/* No submissions */}
-          {submission.arivihanSubjects.length === 0 &&
-            submission.ownSubjects.length === 0 && (
+          {filteredArivihanSubjects.length === 0 &&
+            filteredOwnSubjects.length === 0 && (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 p-12 text-center">
                 <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <DocumentIcon />
