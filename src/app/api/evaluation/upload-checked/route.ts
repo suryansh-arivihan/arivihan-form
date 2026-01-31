@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { updateSubjectEvaluation } from "@/lib/aws/dynamodb";
 import { SubmissionType } from "@/types/form";
+import {
+  getAssignmentByStudentSubject,
+  updateAssignmentStatus,
+} from "@/lib/aws/assignments";
+import {
+  updateTeacherPendingCount,
+  incrementTeacherEvaluated,
+} from "@/lib/aws/teachers";
+import { AssignmentSubmissionType } from "@/types/teacher";
 
 const s3Client = new S3Client({
   region: process.env.APP_AWS_REGION || "ap-south-1",
@@ -63,6 +72,36 @@ export async function POST(request: NextRequest) {
       marksObtained,
       marksTotal
     );
+
+    // Update assignment status to completed
+    try {
+      const assignmentType: AssignmentSubmissionType =
+        submissionType === "arivihan_model_paper" ? "arivihan" : "own";
+
+      const assignment = await getAssignmentByStudentSubject(
+        studentId,
+        subjectCode,
+        assignmentType
+      );
+
+      if (assignment) {
+        // Mark assignment as completed
+        await updateAssignmentStatus(assignment.assignmentId, "completed");
+
+        // Decrement teacher's pending count
+        await updateTeacherPendingCount(assignment.teacherPhone, -1);
+
+        // Increment teacher's total evaluated count
+        await incrementTeacherEvaluated(assignment.teacherPhone);
+
+        console.log(
+          `[Evaluation] Marked assignment ${assignment.assignmentId} as completed for teacher ${assignment.teacherPhone}`
+        );
+      }
+    } catch (assignmentError) {
+      // Log but don't fail the upload if assignment update fails
+      console.error("[Evaluation] Error updating assignment:", assignmentError);
+    }
 
     return NextResponse.json({ success: true, fileUrl, key });
   } catch (error) {

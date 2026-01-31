@@ -7,6 +7,10 @@ import {
 } from "@/lib/aws/dynamodb";
 import { formatDate } from "@/lib/utils/submission-id";
 import { getSubjectByCode } from "@/constants/subjects";
+import {
+  autoAssignSubmission,
+  toAssignmentSubmissionType,
+} from "@/lib/services/assignment-service";
 
 const submitSchema = z.object({
   studentName: z.string().min(2).max(100),
@@ -116,6 +120,22 @@ export async function POST(request: NextRequest) {
 
     // The studentId is same as S3 folder name
     const studentId = generateStudentId(data.studentName, data.mobileNumber);
+
+    // Auto-assign submission to teachers
+    try {
+      const assignmentResult = await autoAssignSubmission(
+        studentId,
+        data.mediumOfStudy,
+        toAssignmentSubmissionType(data.submissionType),
+        data.subjects.map((s) => ({ subjectCode: s.subjectCode }))
+      );
+      console.log(
+        `[Submit] Auto-assignment result: ${assignmentResult.assigned} assigned, ${assignmentResult.failed} failed`
+      );
+    } catch (assignmentError) {
+      // Log but don't fail the submission if assignment fails
+      console.error("[Submit] Auto-assignment error:", assignmentError);
+    }
 
     const submittedSubjects = data.subjects.map((s) => {
       const subject = getSubjectByCode(s.subjectCode);
